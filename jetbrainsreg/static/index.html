@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JetBrainsReg</title>
+<style>
+/* ── Midnight Frost (磨砂暗色) ── */
+[data-theme="dark"]{
+  --bg:#0c0e16;--bg-alt:#141722;--card:rgba(22,26,40,.75);--card-hover:rgba(28,32,50,.85);
+  --border:rgba(255,255,255,.07);--border-focus:#818cf8;
+  --text:#eaeaf0;--text-secondary:#9294a0;--muted:#5e6070;
+  --accent:#818cf8;--accent-hover:#a5b4fc;--accent-bg:rgba(129,140,248,.1);
+  --success:#34d399;--success-bg:rgba(52,211,153,.1);
+  --warning:#fbbf24;--warning-bg:rgba(251,191,36,.1);
+  --error:#f87171;--error-bg:rgba(248,113,113,.1);
+  --shadow:0 4px 24px rgba(0,0,0,.4);--input-bg:rgba(12,14,22,.6);
+  --glass-blur:blur(16px);--glass-border:1px solid rgba(255,255,255,.08);
+}
+/* ── Light ── */
+[data-theme="light"]{
+  --bg:#f4f5f9;--bg-alt:#edeef3;--card:#fff;--card-hover:#f8f8fc;
+  --border:#dfe0e6;--border-focus:#6366f1;
+  --text:#1a1c24;--text-secondary:#64667a;--muted:#9496a8;
+  --accent:#6366f1;--accent-hover:#4f46e5;--accent-bg:rgba(99,102,241,.06);
+  --success:#10b981;--success-bg:rgba(16,185,129,.06);
+  --warning:#f59e0b;--warning-bg:rgba(245,158,11,.06);
+  --error:#ef4444;--error-bg:rgba(239,68,68,.06);
+  --shadow:0 2px 12px rgba(0,0,0,.06);--input-bg:#f4f5f9;
+  --glass-blur:none;--glass-border:1px solid #dfe0e6;
+}
+/* ── Warm Sand (暖沙) ── */
+[data-theme="sand"]{
+  --bg:#faf7f2;--bg-alt:#f3efe8;--card:#fffdf8;--card-hover:#f8f4ee;
+  --border:#e5ddd0;--border-focus:#c08b48;
+  --text:#3d3425;--text-secondary:#7a6e5a;--muted:#a89b86;
+  --accent:#c08b48;--accent-hover:#d4a05e;--accent-bg:rgba(192,139,72,.07);
+  --success:#59a96a;--success-bg:rgba(89,169,106,.07);
+  --warning:#d4942a;--warning-bg:rgba(212,148,42,.07);
+  --error:#c85a4a;--error-bg:rgba(200,90,74,.07);
+  --shadow:0 2px 12px rgba(60,50,30,.08);--input-bg:#faf7f2;
+  --glass-blur:none;--glass-border:1px solid #e5ddd0;
+}
+/* ── Cyberpunk (赛博霓虹) ── */
+[data-theme="cyber"]{
+  --bg:#0a0a12;--bg-alt:#11111d;--card:rgba(18,18,32,.8);--card-hover:rgba(24,24,42,.85);
+  --border:rgba(0,255,170,.12);--border-focus:#00ffaa;
+  --text:#e0ffe8;--text-secondary:#7dffb8;--muted:#3d8060;
+  --accent:#00ffaa;--accent-hover:#66ffd0;--accent-bg:rgba(0,255,170,.08);
+  --success:#00ffaa;--success-bg:rgba(0,255,170,.08);
+  --warning:#ffe066;--warning-bg:rgba(255,224,102,.08);
+  --error:#ff5577;--error-bg:rgba(255,85,119,.08);
+  --shadow:0 4px 32px rgba(0,255,170,.08);--input-bg:rgba(10,10,18,.7);
+  --glass-blur:blur(12px);--glass-border:1px solid rgba(0,255,170,.12);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter','Segoe UI',-apple-system,system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;transition:background .25s,color .25s;line-height:1.6;font-size:15px}
+::selection{background:var(--accent);color:#fff}
+input,select,button,textarea{font-family:inherit}
+.container{max-width:1200px;margin:0 auto;padding:28px 24px 56px}
+.header{display:flex;align-items:center;justify-content:space-between;padding:32px 0 28px}
+.header-left h1{font-size:34px;font-weight:800;letter-spacing:-.5px}
+.header-left h1 .brand{color:var(--accent)}
+.header-left p{color:var(--text-secondary);font-size:15px;margin-top:4px}
+.header-right{display:flex;align-items:center;gap:12px}
+.theme-btn{width:42px;height:42px;border-radius:10px;border:1px solid var(--border);background:var(--card);color:var(--text-secondary);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:20px;transition:all .2s}
+.theme-btn:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-bg)}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--muted);flex-shrink:0}
+.dot.on{background:var(--success);box-shadow:0 0 8px var(--success);animation:blink 2s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.35}}
+.panel{background:var(--card);border:var(--glass-border);border-radius:16px;padding:28px;margin-bottom:22px;box-shadow:var(--shadow);transition:background .25s,border .25s;backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur)}
+.panel-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}
+.panel-title{font-size:16px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-secondary)}
+.sep{height:1px;background:var(--border);margin:18px 0}
+.row{display:flex;gap:16px;margin-bottom:16px;flex-wrap:wrap;align-items:flex-start}
+.fg{display:flex;flex-direction:column;gap:6px;flex:1;min-width:120px}
+.fg label{font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+.fg input,.fg select,.fg textarea{padding:12px 16px;background:var(--input-bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:15px;outline:none;transition:border .2s}
+.fg input:focus,.fg select:focus,.fg textarea:focus{border-color:var(--border-focus)}
+.fg input::placeholder,.fg textarea::placeholder{color:var(--muted)}
+.hint{font-size:12px;color:var(--warning);margin-top:3px}
+.btn-row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.btn{padding:12px 28px;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;transition:all .15s;display:inline-flex;align-items:center;gap:6px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn-accent{background:var(--accent);color:#fff}.btn-accent:hover:not(:disabled){background:var(--accent-hover)}
+.btn-outline{background:transparent;color:var(--text-secondary);border:1px solid var(--border)}.btn-outline:hover:not(:disabled){border-color:var(--text-secondary);color:var(--text)}
+.btn-success{background:var(--success);color:#fff}.btn-success:hover:not(:disabled){filter:brightness(1.1)}
+.btn-danger{background:var(--error);color:#fff}.btn-danger:hover:not(:disabled){filter:brightness(1.1)}
+.btn-warn{background:var(--warning);color:#000}.btn-warn:hover:not(:disabled){filter:brightness(1.05)}
+.btn-sm{padding:8px 16px;font-size:13px;border-radius:6px}
+.ml-auto{margin-left:auto}
+.task-list{display:flex;flex-direction:column;gap:8px}
+.task-card{display:grid;grid-template-columns:54px 1fr 180px 130px;align-items:center;gap:14px;padding:16px 20px;background:var(--card);border:1px solid var(--border);border-radius:12px;transition:background .15s}
+.task-card:hover{background:var(--card-hover)}
+.task-card.waiting{border-left:3px solid var(--warning)}.task-card.working{border-left:3px solid var(--accent)}.task-card.done{border-left:3px solid var(--success)}.task-card.failed{border-left:3px solid var(--error)}
+.t-id{font-size:22px;font-weight:800;color:var(--muted);text-align:center}
+.t-info{min-width:0}.t-email{font-size:15px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.t-step{font-size:13px;color:var(--text-secondary);margin-top:3px}
+.t-pwd{font-family:'JetBrains Mono',Consolas,monospace;font-size:14px;color:var(--text-secondary)}
+.t-badge{text-align:right;font-size:14px;font-weight:700}
+.b-wait{color:var(--warning)}.b-work{color:var(--accent)}.b-done{color:var(--success)}.b-fail{color:var(--error)}
+.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:18px}
+.s-item{text-align:center;padding:16px;background:var(--card);border-radius:12px;border:1px solid var(--border)}
+.s-num{font-size:36px;font-weight:800}.s-label{font-size:14px;color:var(--text-secondary);margin-top:4px}
+.empty{text-align:center;padding:48px 0;color:var(--muted);font-size:15px;line-height:1.8}
+.empty svg{width:52px;height:52px;margin-bottom:12px;opacity:.3}
+.htable{width:100%;border-collapse:collapse;margin-top:12px;font-size:14px}
+.htable th{text-align:left;color:var(--muted);padding:10px 14px;border-bottom:1px solid var(--border);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.4px}
+.htable td{padding:12px 14px;border-bottom:1px solid var(--border)}
+.htable tr:hover td{background:var(--accent-bg)}
+.htable .mono{font-family:'JetBrains Mono',Consolas,monospace;font-size:14px}
+.cbtn{background:none;border:1px solid var(--border);color:var(--text-secondary);padding:5px 12px;border-radius:5px;cursor:pointer;font-size:13px;transition:all .15s}
+.cbtn:hover{color:var(--text);border-color:var(--text-secondary)}
+.cbtn-del{border-color:var(--error);color:var(--error)}.cbtn-del:hover{background:var(--error-bg)}
+#cardResult{margin-top:12px;font-size:13px;line-height:1.6;display:none;padding:12px 16px;border-radius:8px;background:var(--bg-alt);border:1px solid var(--border)}
+.parse-box{position:relative}
+.parse-box textarea{width:100%;height:88px;resize:vertical;font-family:'JetBrains Mono',Consolas,monospace;font-size:13px;line-height:1.6}
+.parse-result{font-size:13px;margin-top:5px;color:var(--success)}
+.card-num-row{display:flex;gap:8px;align-items:stretch}
+.card-num-row input{flex:1}
+.card-num-row .btn-sm{white-space:nowrap;align-self:stretch}
+/* ═══ Searchable Country Select ═══ */
+.country-wrap{position:relative;flex:1}
+.country-wrap input{width:100%;padding:12px 16px;background:var(--input-bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:15px;outline:none;transition:border .2s}
+.country-wrap input:focus{border-color:var(--border-focus)}
+.country-wrap input::placeholder{color:var(--muted)}
+.country-drop{display:none;position:absolute;top:100%;left:0;right:0;z-index:100;max-height:240px;overflow-y:auto;background:var(--card);border:1px solid var(--border);border-radius:0 0 10px 10px;box-shadow:0 8px 24px rgba(0,0,0,.25);margin-top:-1px}
+.country-drop.open{display:block}
+.country-opt{padding:10px 16px;font-size:14px;cursor:pointer;transition:background .1s}
+.country-opt:hover,.country-opt.hl{background:var(--accent-bg);color:var(--accent)}
+.country-opt .co-code{font-size:12px;color:var(--muted);margin-left:6px}
+/* ═══ Settings Modal ═══ */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;justify-content:center;align-items:center;backdrop-filter:blur(4px)}
+.modal-overlay.open{display:flex}
+.modal{background:var(--card);border:var(--glass-border);border-radius:18px;padding:32px;width:min(580px,92vw);max-height:85vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,.4);backdrop-filter:var(--glass-blur)}
+.modal h2{font-size:20px;font-weight:700;margin-bottom:20px}
+.modal .close-btn{position:absolute;top:16px;right:20px;background:none;border:none;color:var(--text-secondary);font-size:24px;cursor:pointer;line-height:1}
+.modal .close-btn:hover{color:var(--text)}
+.cfg-section{margin-bottom:20px}
+.cfg-section h3{font-size:14px;font-weight:700;color:var(--text-secondary);margin-bottom:10px;text-transform:uppercase;letter-spacing:.4px}
+.cfg-row{display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap}
+.cfg-row label{flex:1;min-width:180px;font-size:14px;color:var(--text)}
+.cfg-row input[type="number"]{width:90px;padding:8px 12px;background:var(--input-bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:14px;outline:none}
+.cfg-row input[type="number"]:focus{border-color:var(--border-focus)}
+.cfg-row .cfg-hint{font-size:12px;color:var(--muted);width:100%;margin-top:-4px}
+.theme-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px}
+.theme-card{padding:14px 10px;border-radius:10px;border:2px solid var(--border);cursor:pointer;text-align:center;font-size:13px;font-weight:600;transition:all .15s}
+.theme-card:hover{border-color:var(--accent)}
+.theme-card.active{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-bg)}
+.theme-card .preview{height:28px;border-radius:6px;margin-bottom:8px}
+
+@media(max-width:768px){
+  .task-card{grid-template-columns:40px 1fr 110px}.t-pwd{display:none}
+  .summary{grid-template-columns:repeat(2,1fr)}
+  .header{flex-direction:column;text-align:center;gap:12px}
+  .theme-grid{grid-template-columns:repeat(2,1fr)}
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <div class="header-left">
+      <h1><span class="brand">JetBrains</span>Reg</h1>
+      <p>JetBrains 账号半自动注册机 -- 验证码由你搞定，其余全自动</p>
+    </div>
+    <div class="header-right">
+      <div style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text-secondary)">
+        <div class="dot" id="wsDot"></div><span id="wsStatus">连接中...</span>
+      </div>
+      <button class="theme-btn" onclick="openSettings()" id="settingsBtn" title="设置">&#9881;</button>
+    </div>
+  </div>
+
+  <!-- 控制面板 -->
+  <div class="panel">
+    <div class="panel-head"><span class="panel-title">控制面板</span></div>
+    <div class="row">
+      <div class="fg" style="flex:2"><label>统一密码</label><input type="text" id="password" value="hajimi123"></div>
+      <div class="fg"><label>浏览器</label><select id="browser"><option value="fingerprint">指纹浏览器</option><option value="chrome">Chrome</option><option value="edge">Edge</option></select></div>
+    </div>
+    <div class="hint" style="margin-top:-10px;margin-bottom:10px">* 所有账号统一使用此密码</div>
+    <div class="row">
+      <div class="fg" style="flex:.6;min-width:90px"><label>窗口数</label><input type="number" id="count" value="3" min="1" max="10"></div>
+      <div class="fg" style="flex:1.5;min-width:160px"><label>账号国家</label>
+        <div style="display:flex;gap:6px;align-items:stretch">
+          <input type="hidden" id="country" value="JP">
+          <div class="country-wrap">
+            <input type="text" id="countryInput" value="Japan" placeholder="输入搜索国家..." autocomplete="off" onfocus="openCountryDrop()" oninput="filterCountry()">
+            <div class="country-drop" id="countryDrop"></div>
+          </div>
+          <button class="btn btn-outline btn-sm" onclick="randomCountry()" title="随机选择国家" style="padding:6px 10px;white-space:nowrap">随机</button>
+        </div>
+      </div>
+      <div class="fg"><label>First Name</label><input type="text" id="firstName" value=""></div>
+      <div class="fg"><label>Last Name</label><input type="text" id="lastName" value=""></div>
+      <div class="fg" style="flex:0;min-width:auto"><label>&nbsp;</label><button class="btn btn-outline btn-sm" onclick="randomName()">随机</button></div>
+    </div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:14px">每个窗口自动生成独立的随机英文名，无需手动修改</div>
+    <div class="btn-row">
+      <button class="btn btn-accent" id="btnStart" onclick="startReg()">开始注册</button>
+      <button class="btn btn-outline" id="btnStop" onclick="stopReg()" style="display:none">停止</button>
+      <button class="btn btn-warn btn-sm" id="btnForceStart" onclick="forceStartReg()" style="display:none" title="无视已有任务，强制新建窗口">强制新建窗口</button>
+      <button class="btn btn-danger btn-sm ml-auto" id="btnKillAll" onclick="killAllBrowsers()" title="关闭所有托管的浏览器窗口">关闭所有浏览器</button>
+    </div>
+  </div>
+
+  <!-- 一键填卡 -->
+  <div class="panel" id="cardPanel">
+    <div class="panel-head"><span class="panel-title">一键填卡</span></div>
+
+    <!-- 智能识别粘贴框 -->
+    <div style="margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <label style="font-size:14px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.4px">智能识别 - 粘贴卡片信息</label>
+        <button class="btn btn-accent btn-sm" onclick="parseCardText()">识别并填入</button>
+        <button class="btn btn-outline btn-sm" onclick="document.getElementById('cardPaste').value='';document.getElementById('parseResult').textContent=''">清空</button>
+      </div>
+      <div class="parse-box">
+        <textarea id="cardPaste" placeholder="粘贴卡片信息，支持多种格式自动识别，例如：&#10;4866990054131161&#10;CVV: 407 | 04/29&#10;JOHN DOE"></textarea>
+      </div>
+      <div id="parseResult" class="parse-result"></div>
+    </div>
+
+    <div class="sep"></div>
+
+    <div class="row">
+      <div class="fg" style="flex:2.5"><label>卡号</label>
+        <div class="card-num-row">
+          <input type="text" id="cardNumber" placeholder="4111 1111 1111 1111" maxlength="19" autocomplete="cc-number">
+          <button class="btn btn-outline btn-sm" onclick="document.getElementById('cardNumber').value='';document.getElementById('cardExpiry').value='';document.getElementById('cardCvv').value='';document.getElementById('cardName').value=''" title="清空所有卡信息">清空</button>
+        </div>
+      </div>
+      <div class="fg" style="flex:.8"><label>有效期</label><input type="text" id="cardExpiry" placeholder="MM/YY" maxlength="5" autocomplete="cc-exp"></div>
+      <div class="fg" style="flex:.6"><label>CVV</label><input type="text" id="cardCvv" placeholder="123" maxlength="4" autocomplete="cc-csc"></div>
+    </div>
+    <div class="row">
+      <div class="fg" style="flex:2"><label>持卡人姓名</label><input type="text" id="cardName" placeholder="JOHN DOE" autocomplete="cc-name"></div>
+      <div class="fg"><label>目标窗口</label><select id="cardTarget"><option value="0">所有窗口</option></select></div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-accent" id="btnFillCard" onclick="fillCard()">一键填写</button>
+      <button class="btn btn-outline" id="btnClearCard" onclick="clearCard()" style="border-color:var(--error);color:var(--error)">一键清空</button>
+      <button class="btn btn-success" id="btnConfirmCard" onclick="confirmCard()">一键确认</button>
+      <button class="btn btn-outline btn-sm ml-auto" onclick="refreshBrowsers()">刷新窗口列表</button>
+    </div>
+    <div id="cardResult"></div>
+
+    <div class="sep"></div>
+    <div style="font-size:13px;color:var(--error);margin-bottom:10px">* 手动打开的浏览器无法被识别，请使用下方按钮打开或使用注册时自动打开的窗口</div>
+    <div class="row" style="align-items:flex-end;margin-bottom:0">
+      <div class="fg" style="flex:.5;min-width:80px"><label>打开数量</label><input type="number" id="openBrowserCount" value="1" min="1" max="20"></div>
+      <div class="fg" style="flex:.6"><label>浏览器</label><select id="openBrowserType"><option value="fingerprint">指纹浏览器</option><option value="chrome">Chrome</option><option value="edge">Edge</option></select></div>
+      <div class="fg" style="flex:0;min-width:auto"><label>&nbsp;</label><button class="btn btn-accent btn-sm" id="btnOpenBrowser" onclick="openBrowsers()">打开浏览器</button></div>
+    </div>
+  </div>
+
+  <!-- 任务区域 -->
+  <div id="taskArea">
+    <div class="empty">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+      <div>设置参数后点击「开始注册」<br>每个账号弹出浏览器窗口，手动过验证码即可<br>注册成功后浏览器保留不关闭</div>
+    </div>
+  </div>
+
+  <div class="summary" id="summary" style="display:none">
+    <div class="s-item"><div class="s-num" id="numTotal" style="color:var(--text)">0</div><div class="s-label">总计</div></div>
+    <div class="s-item"><div class="s-num" id="numSuccess" style="color:var(--success)">0</div><div class="s-label">成功</div></div>
+    <div class="s-item"><div class="s-num" id="numFailed" style="color:var(--error)">0</div><div class="s-label">失败</div></div>
+    <div class="s-item"><div class="s-num" id="numPending" style="color:var(--warning)">0</div><div class="s-label">进行中</div></div>
+  </div>
+
+  <!-- 历史记录 -->
+  <div class="panel" style="margin-top:20px" id="historyPanel">
+    <div class="panel-head">
+      <span class="panel-title">已注册账号（永久保存）</span>
+      <div style="display:flex;gap:6px" id="historyActions">
+        <button class="btn btn-outline btn-sm" onclick="toggleSelectAll()" id="btnSelectAll" style="display:none">全选</button>
+        <button class="btn btn-sm" onclick="deleteSelected()" id="btnDeleteSelected" style="display:none;background:var(--error-bg);color:var(--error);border:1px solid var(--error)">删除选中</button>
+      </div>
+    </div>
+    <div id="historyArea"><span style="color:var(--muted);font-size:13px">暂无记录</span></div>
+  </div>
+</div>
+
+<!-- 设置弹窗 -->
+<div class="modal-overlay" id="settingsOverlay" onclick="if(event.target===this)closeSettings()">
+  <div class="modal" style="position:relative">
+    <button class="close-btn" onclick="closeSettings()" style="position:absolute;top:16px;right:20px;background:none;border:none;color:var(--text-secondary);font-size:24px;cursor:pointer">&times;</button>
+    <h2>设置</h2>
+
+    <div class="cfg-section">
+      <h3>主题外观</h3>
+      <div class="theme-grid" id="themeGrid">
+        <div class="theme-card" data-theme-val="dark" onclick="setTheme('dark')">
+          <div class="preview" style="background:linear-gradient(135deg,#0c0e16,#1a1d2e)"></div>磨砂暗夜
+        </div>
+        <div class="theme-card" data-theme-val="light" onclick="setTheme('light')">
+          <div class="preview" style="background:linear-gradient(135deg,#f4f5f9,#fff)"></div>经典亮色
+        </div>
+        <div class="theme-card" data-theme-val="sand" onclick="setTheme('sand')">
+          <div class="preview" style="background:linear-gradient(135deg,#faf7f2,#e5ddd0)"></div>暖沙米色
+        </div>
+        <div class="theme-card" data-theme-val="cyber" onclick="setTheme('cyber')">
+          <div class="preview" style="background:linear-gradient(135deg,#0a0a12,#003322)"></div>赛博霓虹
+        </div>
+      </div>
+    </div>
+
+    <div class="cfg-section">
+      <h3>延迟控制（秒）</h3>
+      <div id="cfgFields"></div>
+    </div>
+
+    <div class="btn-row" style="justify-content:flex-end;margin-top:16px">
+      <button class="btn btn-outline btn-sm" onclick="resetDelays()">恢复默认</button>
+      <button class="btn btn-accent" onclick="saveDelays()">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ═══ Theme & Settings ═══ */
+const THEMES=['dark','light','sand','cyber'];
+function setTheme(t){
+  document.documentElement.setAttribute('data-theme',t);
+  localStorage.setItem('jbreg-theme',t);
+  document.querySelectorAll('.theme-card').forEach(c=>c.classList.toggle('active',c.dataset.themeVal===t));
+}
+function openSettings(){
+  document.getElementById('settingsOverlay').classList.add('open');
+  loadDelayConfig();
+  const cur=document.documentElement.getAttribute('data-theme')||'dark';
+  document.querySelectorAll('.theme-card').forEach(c=>c.classList.toggle('active',c.dataset.themeVal===cur));
+}
+function closeSettings(){document.getElementById('settingsOverlay').classList.remove('open');}
+
+const DELAY_META={
+  DELAY_CLICK:{label:'点击后等待',hint:'推荐 1.5~3s，网络差时调大',def:2},
+  DELAY_INPUT:{label:'输入后等待',hint:'推荐 0.3~1s',def:0.5},
+  DELAY_PAGE_NAV:{label:'页面跳转后等待',hint:'推荐 2~5s，VPN 慢时调大',def:3},
+  DELAY_CAPTCHA_POLL:{label:'验证码轮询间隔',hint:'推荐 1.5~3s',def:2},
+  DELAY_OTP_CHAR:{label:'验证码逐字输入间隔',hint:'推荐 0.08~0.3s，过快可能丢字',def:0.15},
+  DELAY_STEP_TRANSITION:{label:'步骤切换等待',hint:'推荐 1~3s',def:2},
+  DELAY_BROWSER_STAGGER:{label:'批量开窗间隔',hint:'推荐 1~4s，多窗口时防卡',def:2},
+  EMAIL_POLL_INTERVAL:{label:'邮件轮询间隔',hint:'推荐 2~5s',def:3},
+  EMAIL_POLL_TIMEOUT:{label:'邮件等待超时',hint:'推荐 300~900s，邮件慢时调大',def:600},
+  PAGE_TIMEOUT:{label:'页面加载超时',hint:'推荐 15~60s',def:30},
+};
+
+async function loadDelayConfig(){
+  const container=document.getElementById('cfgFields');
+  let vals={};
+  // Load from server, fallback to localStorage
+  try{const r=await fetch('/api/config');vals=await r.json();}catch(e){vals=JSON.parse(localStorage.getItem('jbreg-delays')||'{}');}
+  // Merge with localStorage overrides
+  const local=JSON.parse(localStorage.getItem('jbreg-delays')||'{}');
+  for(const k in local) if(!(k in vals)) vals[k]=local[k];
+
+  let html='';
+  for(const [key,meta] of Object.entries(DELAY_META)){
+    const v=vals[key]!==undefined?vals[key]:meta.def;
+    html+=`<div class="cfg-row">
+      <label>${meta.label}</label>
+      <input type="number" id="cfg_${key}" value="${v}" step="0.1" min="0">
+      <div class="cfg-hint">${meta.hint} (default: ${meta.def})</div>
+    </div>`;
+  }
+  container.innerHTML=html;
+}
+
+async function saveDelays(){
+  const vals={};
+  for(const key of Object.keys(DELAY_META)){
+    const el=document.getElementById('cfg_'+key);
+    if(el) vals[key]=parseFloat(el.value)||0;
+  }
+  // Save to localStorage
+  localStorage.setItem('jbreg-delays',JSON.stringify(vals));
+  // Push to server
+  for(const [k,v] of Object.entries(vals)){
+    try{await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k,value:v})});}catch(e){}
+  }
+  closeSettings();
+  showCardResult('ok','设置已保存');
+}
+
+function resetDelays(){
+  for(const [key,meta] of Object.entries(DELAY_META)){
+    const el=document.getElementById('cfg_'+key);
+    if(el) el.value=meta.def;
+  }
+}
+
+// On page load: restore delays from localStorage and push to server
+(function(){
+  const s=localStorage.getItem('jbreg-theme');
+  if(s) document.documentElement.setAttribute('data-theme',s);
+  // Restore delays
+  const delays=JSON.parse(localStorage.getItem('jbreg-delays')||'{}');
+  if(Object.keys(delays).length){
+    for(const [k,v] of Object.entries(delays)){
+      fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k,value:v})}).catch(()=>{});
+    }
+  }
+})();
+
+/* ═══ State ═══ */
+let ws=null, tasks={}, history=[];
+const FN=['James','John','Robert','Michael','David','William','Richard','Joseph','Thomas','Chris','Daniel','Paul','Mark','George','Steven','Kevin','Brian','Edward','Alex','Ryan','Lucas','Noah','Ethan','Mason','Logan','Leo','Jack','Henry','Owen','Samuel','Oliver','Liam','Benjamin','Theodore','Sebastian','Caleb','Nathan','Adrian','Dylan','Hunter','Carter','Jayden','Luke','Gabriel','Isaac','Lincoln','Julian','Mateo','Wyatt','Levi','Andrew','Eli','Landon','Connor','Aaron','Easton','Cooper','Nolan','Cameron','Kai','Evan','Austin','Colton','Asher','Declan','Parker','Blake','Finn','Gavin','Silas','Elena','Clara','Mila','Aria','Chloe','Stella','Ruby','Hazel','Ivy','Lily','Nora','Grace','Maya','Zoe','Alice','Ellie','Sophie','Luna','Violet','Willow'];
+const LN=['Smith','Johnson','Williams','Brown','Jones','Garcia','Miller','Davis','Wilson','Moore','Taylor','Anderson','Thomas','Jackson','White','Harris','Martin','Clark','Lewis','Walker','Hall','Allen','Young','King','Wright','Lopez','Hill','Scott','Green','Adams','Nelson','Baker','Rivera','Campbell','Mitchell','Carter','Roberts','Turner','Parker','Evans','Collins','Edwards','Stewart','Morris','Rogers','Reed','Cook','Morgan','Bell','Murphy','Bailey','Cooper','Richardson','Cox','Howard','Ward','Brooks','Kelly','Sanders','Price','Bennett','Wood','Barnes','Ross','Henderson','Coleman','Jenkins','Perry','Powell','Russell','Foster','Hayes','Sullivan','Bryant','Watson','Griffin','Palmer','Hunt','Stone','Webb'];
+
+function randomName(){document.getElementById('firstName').value=FN[Math.floor(Math.random()*FN.length)];document.getElementById('lastName').value=LN[Math.floor(Math.random()*LN.length)];}
+function randomCardName(){document.getElementById('cardName').value=(FN[Math.floor(Math.random()*FN.length)]+' '+LN[Math.floor(Math.random()*LN.length)]).toUpperCase();}
+/* ═══ Searchable Country ═══ */
+const COUNTRIES=[
+['JP','Japan'],['US','United States'],['GB','United Kingdom'],['DE','Germany'],['FR','France'],
+['KR','Republic of Korea'],['SG','Singapore'],['CA','Canada'],['AU','Australia'],['NL','Netherlands'],
+['SE','Sweden'],['CH','Switzerland'],['IN','India'],['BR','Brazil'],['IT','Italy'],['ES','Spain'],
+['PT','Portugal'],['AT','Austria'],['BE','Belgium'],['DK','Denmark'],['FI','Finland'],['NO','Norway'],
+['IE','Ireland'],['PL','Poland'],['CZ','Czech Republic'],['GR','Greece'],['IL','Israel'],
+['NZ','New Zealand'],['MX','Mexico'],['AR','Argentina'],['CL','Chile'],['CO','Colombia'],['PE','Peru'],
+['PH','Philippines'],['TH','Thailand'],['MY','Malaysia'],['ID','Indonesia'],['VN','Vietnam'],
+['ZA','South Africa'],['EG','Egypt'],['NG','Nigeria'],['KE','Kenya'],['TR','Turkey'],['RO','Romania'],
+['HU','Hungary'],['BG','Bulgaria'],['HR','Croatia'],['SK','Slovakia'],['SI','Slovenia'],
+['LT','Lithuania'],['LV','Latvia'],['EE','Estonia'],['IS','Iceland'],['MT','Malta'],['CY','Cyprus'],
+['LU','Luxembourg'],['AE','United Arab Emirates'],['SA','Saudi Arabia'],['QA','Qatar'],['KW','Kuwait'],
+['BH','Bahrain'],['OM','Oman'],['JO','Jordan'],['UY','Uruguay'],['PA','Panama'],['CR','Costa Rica'],
+['EC','Ecuador'],['DO','Dominican Republic'],['GT','Guatemala'],['BD','Bangladesh'],['PK','Pakistan'],
+['LK','Sri Lanka'],['NP','Nepal'],['KH','Cambodia'],['MM','Myanmar'],['MN','Mongolia'],
+['KZ','Kazakhstan'],['UZ','Uzbekistan'],['GE','Georgia'],['AM','Armenia'],['AZ','Azerbaijan'],
+['RS','Serbia'],['BA','Bosnia and Herzegovina'],['ME','Montenegro'],['MK','North Macedonia'],
+['AL','Albania'],['MD','Moldova'],['TT','Trinidad and Tobago'],['JM','Jamaica'],['MU','Mauritius'],
+['GH','Ghana'],['TZ','Tanzania'],['SN','Senegal']
+];
+let countryHlIdx=-1;
+function openCountryDrop(){filterCountry();document.getElementById('countryDrop').classList.add('open');}
+function closeCountryDrop(){setTimeout(()=>document.getElementById('countryDrop').classList.remove('open'),150);}
+function filterCountry(){
+  const q=document.getElementById('countryInput').value.toLowerCase().trim();
+  const drop=document.getElementById('countryDrop');
+  const matches=q?COUNTRIES.filter(([c,n])=>n.toLowerCase().includes(q)||c.toLowerCase().includes(q)):COUNTRIES;
+  countryHlIdx=-1;
+  drop.innerHTML=matches.map(([c,n],i)=>`<div class="country-opt" data-code="${c}" data-name="${n}" onmousedown="pickCountry('${c}','${n}')">${n}<span class="co-code">${c}</span></div>`).join('');
+  if(matches.length)drop.classList.add('open'); else drop.classList.remove('open');
+}
+function pickCountry(code,name){
+  document.getElementById('country').value=code;
+  document.getElementById('countryInput').value=name;
+  document.getElementById('countryDrop').classList.remove('open');
+  saveFormData();
+}
+function randomCountry(){const r=COUNTRIES[Math.floor(Math.random()*COUNTRIES.length)];pickCountry(r[0],r[1]);}
+document.getElementById('countryInput').addEventListener('blur',closeCountryDrop);
+document.getElementById('countryInput').addEventListener('keydown',function(e){
+  const opts=document.querySelectorAll('#countryDrop .country-opt');
+  if(!opts.length)return;
+  if(e.key==='ArrowDown'){e.preventDefault();countryHlIdx=Math.min(countryHlIdx+1,opts.length-1);opts.forEach((o,i)=>o.classList.toggle('hl',i===countryHlIdx));opts[countryHlIdx].scrollIntoView({block:'nearest'});}
+  else if(e.key==='ArrowUp'){e.preventDefault();countryHlIdx=Math.max(countryHlIdx-1,0);opts.forEach((o,i)=>o.classList.toggle('hl',i===countryHlIdx));opts[countryHlIdx].scrollIntoView({block:'nearest'});}
+  else if(e.key==='Enter'&&countryHlIdx>=0){e.preventDefault();const o=opts[countryHlIdx];pickCountry(o.dataset.code,o.dataset.name);}
+  else if(e.key==='Escape'){document.getElementById('countryDrop').classList.remove('open');}
+});
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+function copyRow(e,p){navigator.clipboard.writeText(e+' / '+p);}
+
+/* ═══ 智能识别粘贴的卡片信息 ═══ */
+function parseCardText(){
+  const raw=document.getElementById('cardPaste').value.trim();
+  if(!raw){document.getElementById('parseResult').textContent='请先粘贴卡片信息';document.getElementById('parseResult').style.color='var(--error)';return;}
+  let cardNum='',cvv='',expiry='',name='';
+  const lines=raw.split(/\n/).map(l=>l.trim()).filter(Boolean);
+  const fullText=raw;
+
+  // 卡号: 13-19位纯数字（可能带空格）
+  const cardMatch=fullText.match(/\b(\d[\d\s]{12,22}\d)\b/);
+  if(cardMatch){
+    const candidate=cardMatch[1].replace(/\s/g,'');
+    if(candidate.length>=13 && candidate.length<=19) cardNum=candidate;
+  }
+  if(!cardNum){
+    // 尝试 "Card Number: XXXX" 格式
+    const m2=fullText.match(/(?:卡号|card\s*number)\s*[:：]?\s*(\d[\d\s]{12,22}\d)/i);
+    if(m2) cardNum=m2[1].replace(/\s/g,'');
+  }
+
+  // CVV: 3-4位数字
+  const cvvMatch=fullText.match(/(?:CVV|CVC|安全码)\s*[:：|]?\s*(\d{3,4})\b/i);
+  if(cvvMatch) cvv=cvvMatch[1];
+
+  // 有效期: MM/YY 或 MM/YYYY 或 YYYY/MM
+  const expiryPatterns=[
+    /(?:有效期|expiry|exp|日期)\s*[:：|]?\s*(\d{1,2})\s*[\/\-]\s*(\d{2,4})/i,
+    /\b(\d{4})\s*[\/\-]\s*(\d{1,2})\b/,  // YYYY/MM
+    /\|\s*(\d{2})\s*[\/\-]\s*(\d{2,4})\b/,  // | MM/YY
+  ];
+  for(const pat of expiryPatterns){
+    const m=fullText.match(pat);
+    if(m){
+      let p1=m[1], p2=m[2];
+      // 判断 YYYY/MM vs MM/YY
+      if(p1.length===4 && parseInt(p1)>2000){
+        // YYYY/M -> MM/YY
+        expiry=p2.padStart(2,'0')+'/'+p1.slice(2);
+      } else {
+        // MM/YY or MM/YYYY
+        expiry=p1.padStart(2,'0')+'/'+(p2.length===4?p2.slice(2):p2);
+      }
+      break;
+    }
+  }
+  // 兜底：找独立的 MM/YY 模式（不在卡号旁边）
+  if(!expiry){
+    const m=fullText.match(/\b(0[1-9]|1[0-2])\s*\/\s*(\d{2})\b/);
+    if(m) expiry=m[1]+'/'+m[2];
+  }
+
+  // 姓名: "Name: XXX" 或全大写英文名行
+  const nameMatch=fullText.match(/(?:姓名|name|持卡人)\s*[:：]?\s*([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)+)/i);
+  if(nameMatch) name=nameMatch[1].toUpperCase();
+  if(!name){
+    // 找全大写的行（排除已识别的数据）
+    for(const line of lines){
+      if(/^[A-Z][A-Z\s.'-]{3,40}$/.test(line) && !/\d/.test(line) && !/(CVV|CARD|EXPIRY|PHONE|API|ADDRESS|HTTP)/i.test(line)){
+        name=line; break;
+      }
+    }
+  }
+
+  // 填入
+  let filled=[];
+  if(cardNum){document.getElementById('cardNumber').value=cardNum;filled.push('卡号: '+cardNum);}
+  if(cvv){document.getElementById('cardCvv').value=cvv;filled.push('CVV: '+cvv);}
+  if(expiry){document.getElementById('cardExpiry').value=expiry;filled.push('有效期: '+expiry);}
+  if(name){document.getElementById('cardName').value=name;filled.push('姓名: '+name);}
+
+  const el=document.getElementById('parseResult');
+  if(filled.length){
+    el.style.color='var(--success)';
+    el.textContent='已识别并填入: '+filled.join(' | ');
+  } else {
+    el.style.color='var(--error)';
+    el.textContent='未能识别任何卡片信息，请检查格式';
+  }
+}
+
+// 粘贴时自动识别
+document.getElementById('cardPaste').addEventListener('paste',function(){setTimeout(parseCardText,100);});
+
+/* ═══ WebSocket ═══ */
+function connectWS(){
+  const proto=location.protocol==='https:'?'wss':'ws';
+  ws=new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onopen=()=>{document.getElementById('wsDot').className='dot on';document.getElementById('wsStatus').textContent='已连接';};
+  ws.onclose=()=>{document.getElementById('wsDot').className='dot';document.getElementById('wsStatus').textContent='重连中...';setTimeout(connectWS,3000);};
+  ws.onmessage=(e)=>handleMessage(JSON.parse(e.data));
+}
+function handleMessage(msg){
+  if(msg.type==='snapshot'){
+    tasks=msg.tasks||{};history=msg.history||[];renderTasks();updateSummary();renderHistory();
+    if(msg.running){document.getElementById('btnStart').style.display='none';document.getElementById('btnStop').style.display='';document.getElementById('btnForceStart').style.display='';}
+  }else if(msg.type==='started'){
+    tasks=msg.tasks||{};document.getElementById('btnStart').style.display='none';document.getElementById('btnStop').style.display='';document.getElementById('btnForceStart').style.display='';document.getElementById('btnStart').disabled=false;renderTasks();updateSummary();
+  }else if(msg.type==='task_update'){
+    tasks[msg.task.task_id]=msg.task;renderTasks();updateSummary();
+  }else if(msg.type==='completed'||msg.type==='stopped'){
+    document.getElementById('btnStart').style.display='';document.getElementById('btnStart').disabled=false;document.getElementById('btnStop').style.display='none';document.getElementById('btnForceStart').style.display='none';
+    if(msg.history){history=msg.history;renderHistory();}updateSummary();
+  }else if(msg.type==='history_update'){history=msg.history||[];renderHistory();}
+}
+
+/* ═══ Render ═══ */
+function renderTasks(){
+  const area=document.getElementById('taskArea'),ids=Object.keys(tasks).map(Number).sort((a,b)=>a-b);
+  if(!ids.length)return;
+  document.getElementById('summary').style.display='grid';
+  let h='<div class="task-list">';
+  for(const id of ids){
+    const t=tasks[id]; let cls='working',badge='<span class="b-work">进行中</span>';
+    if(t.success===true){cls='done';badge='<span class="b-done">&#10003; 成功</span>';}
+    else if(t.success===false){cls='failed';badge='<span class="b-fail">&#10007; 失败</span>';}
+    else if(t.step===5){cls='waiting';badge='<span class="b-wait">&#9888; 请过验证码</span>';}
+    else if(t.step===0){cls='';badge='<span class="b-work">排队中</span>';}
+    h+=`<div class="task-card ${cls}"><div class="t-id">#${id}</div><div class="t-info"><div class="t-email">${esc(t.email||'--')}</div><div class="t-step">${esc(t.step_label||(t.step>0?'步骤 '+t.step+'/8':'等待中'))}</div></div><div class="t-pwd">${esc(t.password||'')}</div><div class="t-badge">${badge}</div></div>`;
+  }
+  area.innerHTML=h+'</div>';
+}
+function renderHistory(){
+  const area=document.getElementById('historyArea'),bs=document.getElementById('btnSelectAll'),bd=document.getElementById('btnDeleteSelected');
+  if(!history.length){area.innerHTML='<span style="color:var(--muted);font-size:13px">暂无记录</span>';bs.style.display='none';bd.style.display='none';return;}
+  bs.style.display='';bd.style.display='';
+  let h='<table class="htable"><thead><tr><th style="width:28px"><input type="checkbox" id="histCheckAll" onchange="onCheckAll(this)"></th><th>#</th><th>邮箱</th><th>密码</th><th>时间</th><th></th></tr></thead><tbody>';
+  for(const r of history){h+=`<tr><td><input type="checkbox" class="hist-check" value="${r.id}" onchange="onCheckChange()"></td><td style="color:var(--muted)">${r.id}</td><td class="mono">${esc(r.email)}</td><td class="mono">${esc(r.password)}</td><td style="color:var(--muted);font-size:11px">${esc(r.time||'')}</td><td><button class="cbtn" onclick="copyRow('${esc(r.email)}','${esc(r.password)}')">复制</button> <button class="cbtn cbtn-del" onclick="deleteSingle(${r.id})">删除</button></td></tr>`;}
+  area.innerHTML=h+'</tbody></table>';
+}
+function updateSummary(){
+  const v=Object.values(tasks),total=v.length,s=v.filter(t=>t.success===true).length,f=v.filter(t=>t.success===false).length;
+  document.getElementById('numTotal').textContent=total;document.getElementById('numSuccess').textContent=s;document.getElementById('numFailed').textContent=f;document.getElementById('numPending').textContent=total-s-f;
+}
+
+/* ═══ API ═══ */
+async function startReg(){
+  const btn=document.getElementById('btnStart');btn.disabled=true;
+  try{const r=await fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:parseInt(document.getElementById('count').value)||3,password:document.getElementById('password').value,first_name:document.getElementById('firstName').value,last_name:document.getElementById('lastName').value,browser:document.getElementById('browser').value,country:document.getElementById('country').value})});const d=await r.json();if(!d.ok){alert(d.error||'启动失败');btn.disabled=false;}}catch(e){alert('请求失败: '+e.message);btn.disabled=false;}
+}
+async function forceStartReg(){
+  const btn=document.getElementById('btnForceStart');btn.disabled=true;btn.textContent='创建中...';
+  try{const r=await fetch('/api/force-start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:parseInt(document.getElementById('count').value)||3,password:document.getElementById('password').value,first_name:document.getElementById('firstName').value,last_name:document.getElementById('lastName').value,browser:document.getElementById('browser').value,country:document.getElementById('country').value})});const d=await r.json();if(!d.ok)alert(d.error||'启动失败');}catch(e){alert('请求失败: '+e.message);}
+  btn.disabled=false;btn.textContent='强制新建窗口';
+}
+async function stopReg(){await fetch('/api/stop',{method:'POST'});}
+async function killAllBrowsers(){
+  if(!confirm('确认关闭所有托管的浏览器窗口？'))return;
+  const btn=document.getElementById('btnKillAll');btn.disabled=true;btn.textContent='关闭中...';
+  try{const r=await fetch('/api/kill-all-browsers',{method:'POST'});const d=await r.json();alert(d.ok?d.message:'关闭失败');}catch(e){alert('请求失败: '+e.message);}
+  btn.disabled=false;btn.textContent='关闭所有浏览器';setTimeout(refreshBrowsers,1000);
+}
+
+/* ═══ 填卡 ═══ */
+async function refreshBrowsers(){
+  try{const r=await fetch('/api/browsers');const d=await r.json();const sel=document.getElementById('cardTarget');sel.innerHTML='<option value="0">所有窗口（'+d.length+'个）</option>';
+  for(const b of d){const o=document.createElement('option');o.value=b.port||b.task_id||0;o.textContent=b.browser==='jetbrainsreg'?`注册 #${b.task_id} - ${b.email||''}`:`${b.browser} :${b.port} - ${(b.title||b.url||'').substring(0,35)}`;sel.appendChild(o);}
+  showCardResult(d.length?'ok':'warn',d.length?`扫描到 ${d.length} 个浏览器窗口`:'未检测到浏览器窗口');}catch(e){showCardResult('err','刷新失败: '+e.message);}
+}
+async function fillCard(){
+  const btn=document.getElementById('btnFillCard');btn.disabled=true;btn.textContent='填写中...';
+  const cn=document.getElementById('cardNumber').value.replace(/\s/g,''),ex=document.getElementById('cardExpiry').value.trim(),cv=document.getElementById('cardCvv').value.trim(),nm=document.getElementById('cardName').value.trim(),tid=parseInt(document.getElementById('cardTarget').value);
+  if(!cn){showCardResult('err','请输入卡号');btn.disabled=false;btn.textContent='一键填写';return;}
+  try{const r=await fetch('/api/fill-card',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:tid,card_number:cn,expiry_date:ex,cvv:cv,card_name:nm})});const d=await r.json();
+  if(d.ok){let det=d.message;if(d.results){det+='<br>';for(const x of d.results)det+=`<span style="color:var(${x.ok?'--success':'--error'})">${x.ok?'&#10003;':'&#10007;'} ${esc(String(x.label||'?'))}: ${esc(x.message)}</span><br>`;}showCardResult('ok',det);}else showCardResult('err',d.error||d.message||'填写失败');
+  }catch(e){showCardResult('err','请求失败: '+e.message);}btn.disabled=false;btn.textContent='一键填写';
+}
+async function clearCard(){
+  const btn=document.getElementById('btnClearCard');btn.disabled=true;btn.textContent='清空中...';const tid=parseInt(document.getElementById('cardTarget').value);
+  try{const r=await fetch('/api/clear-card',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:tid})});const d=await r.json();
+  if(d.ok){let det=d.message;if(d.results){det+='<br>';for(const x of d.results)det+=`<span style="color:var(${x.ok?'--success':'--error'})">${x.ok?'&#10003;':'&#10007;'} ${esc(String(x.label||'?'))}: ${esc(x.message)}</span><br>`;}showCardResult('ok',det);}else showCardResult('err',d.error||'清空失败');
+  }catch(e){showCardResult('err','请求失败: '+e.message);}btn.disabled=false;btn.textContent='一键清空';
+}
+async function confirmCard(){
+  const btn=document.getElementById('btnConfirmCard');btn.disabled=true;btn.textContent='确认中...';const tid=parseInt(document.getElementById('cardTarget').value);
+  try{const r=await fetch('/api/confirm-card',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:tid})});const d=await r.json();
+  if(d.ok){let det=d.message;if(d.results){det+='<br>';for(const x of d.results)det+=`<span style="color:var(${x.ok?'--success':'--error'})">${x.ok?'&#10003;':'&#10007;'} ${esc(String(x.label||'?'))}: ${esc(x.message)}</span><br>`;}showCardResult('ok',det);}else showCardResult('err',d.error||'确认失败');
+  }catch(e){showCardResult('err','请求失败: '+e.message);}btn.disabled=false;btn.textContent='一键确认';
+}
+function showCardResult(type,msg){const el=document.getElementById('cardResult');el.style.display='block';el.style.color=type==='ok'?'var(--success)':type==='warn'?'var(--warning)':'var(--error)';el.innerHTML=msg;}
+async function openBrowsers(){
+  const btn=document.getElementById('btnOpenBrowser');btn.disabled=true;btn.textContent='打开中...';
+  const cnt=parseInt(document.getElementById('openBrowserCount').value)||1,br=document.getElementById('openBrowserType').value;
+  try{const r=await fetch('/api/open-browsers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:cnt,browser:br})});const d=await r.json();
+  if(d.ok){showCardResult('ok',d.message+' -- 请在弹出窗口中登录 JetBrains，然后导航到绑卡页');setTimeout(refreshBrowsers,2000);}else showCardResult('err',d.error||d.message||'打开失败');
+  }catch(e){showCardResult('err','请求失败: '+e.message);}btn.disabled=false;btn.textContent='打开浏览器';
+}
+
+/* ═══ 历史记录 ═══ */
+function onCheckAll(el){document.querySelectorAll('.hist-check').forEach(c=>c.checked=el.checked);onCheckChange();}
+function onCheckChange(){const n=document.querySelectorAll('.hist-check:checked').length;document.getElementById('btnDeleteSelected').textContent=n?`删除选中 (${n})`:'删除选中';}
+function toggleSelectAll(){const c=document.getElementById('histCheckAll');if(c){c.checked=!c.checked;onCheckAll(c);}}
+async function deleteSingle(id){if(!confirm('确认删除这条记录？'))return;await _doDelete([id]);}
+async function deleteSelected(){const cks=document.querySelectorAll('.hist-check:checked');if(!cks.length){alert('请先勾选要删除的记录');return;}const ids=Array.from(cks).map(c=>parseInt(c.value));if(!confirm(`确认删除 ${ids.length} 条记录？`))return;await _doDelete(ids);}
+async function _doDelete(ids){try{const r=await fetch('/api/history/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})});const d=await r.json();if(d.ok){const h=await fetch('/api/history');history=await h.json();renderHistory();}else alert(d.error||'删除失败');}catch(e){alert('删除失败: '+e.message);}}
+
+/* ═══ 输入格式化 ═══ */
+document.getElementById('cardExpiry').addEventListener('input',function(){let v=this.value.replace(/[^\d]/g,'');if(v.length>=2)v=v.substring(0,2)+'/'+v.substring(2,4);this.value=v;});
+document.getElementById('cardNumber').addEventListener('input',function(){this.value=this.value.replace(/[^\d\s]/g,'');});
+
+/* ═══ 表单数据持久化 ═══ */
+const PERSIST_FIELDS=['password','browser','count','country','countryInput','cardNumber','cardExpiry','cardCvv','cardName','openBrowserCount','openBrowserType'];
+function saveFormData(){
+  const data={};
+  for(const id of PERSIST_FIELDS){const el=document.getElementById(id);if(el)data[id]=el.value;}
+  localStorage.setItem('jbreg-form',JSON.stringify(data));
+}
+function restoreFormData(){
+  try{
+    const data=JSON.parse(localStorage.getItem('jbreg-form')||'{}');
+    for(const [id,val] of Object.entries(data)){
+      const el=document.getElementById(id);
+      if(el && val) el.value=val;
+    }
+  }catch(e){}
+}
+// 自动保存：监听所有持久化字段的变化
+PERSIST_FIELDS.forEach(id=>{
+  const el=document.getElementById(id);
+  if(el) el.addEventListener('change',saveFormData);
+  if(el && (el.tagName==='INPUT'||el.tagName==='TEXTAREA')) el.addEventListener('input',saveFormData);
+});
+
+/* ═══ 初始化 ═══ */
+restoreFormData();
+randomName(); randomCardName(); connectWS();
+</script>
+</body>
+</html>
