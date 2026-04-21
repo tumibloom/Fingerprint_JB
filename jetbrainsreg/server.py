@@ -20,8 +20,8 @@ from pydantic import BaseModel
 from . import config
 from .register import (register_one, fill_card_info, clear_card_info, confirm_card,
                        scan_debug_browsers, connect_browser_by_port, open_browsers,
-                       cleanup_stale_data_dirs,
-                       TaskStatus, AccountResult)
+                       cleanup_stale_data_dirs, login_and_check, login_batch,
+                       TaskStatus, AccountResult, LoginResult)
 
 logger = logging.getLogger("jetbrainsreg.server")
 
@@ -80,6 +80,49 @@ def _save_account(account: dict):
             ])
 
 
+def _save_history():
+    """将完整 history 保存到 JSON（线程安全），用于更新绑卡状态等非新增场景"""
+    with _file_lock:
+        ACCOUNTS_JSON.write_text(
+            json.dumps(state.history, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+
+def _update_country(email: str, country: str, country_name: str = ""):
+    """更新某个账号的国家信息并持久化 + 广播"""
+    changed = False
+    with state.lock:
+        for h in state.history:
+            if h.get("email") == email:
+                if h.get("country", "") != country:
+                    h["country"] = country
+                    h["country_name"] = country_name
+                    changed = True
+                break
+    if changed:
+        _save_history()
+        _broadcast_from_thread({"type": "history_update", "history": state.history})
+
+
+def _update_card_status(email: str, card_status: str, card_detail: str = ""):
+    """更新某个账号的绑卡状态并持久化 + 广播"""
+    changed = False
+    with state.lock:
+        for h in state.history:
+            if h.get("email") == email:
+                old = h.get("card_status", "")
+                if old != card_status or h.get("card_detail", "") != card_detail:
+                    h["card_status"] = card_status
+                    h["card_detail"] = card_detail
+                    h["card_check_time"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                    changed = True
+                break
+    if changed:
+        _save_history()
+        _broadcast_from_thread({"type": "history_update", "history": state.history})
+
+
 # ── 全局状态 ──
 
 class AppState:
@@ -118,6 +161,79 @@ def _broadcast_from_thread(message: dict):
         asyncio.run_coroutine_threadsafe(_broadcast(message), _event_loop)
 
 
+# ── 后台绑卡状态实时监测 ──
+
+_card_monitor_running = False
+
+
+def _start_card_monitor():
+    """启动后台线程，定期检查已登录浏览器的绑卡状态变化"""
+    global _card_monitor_running
+    if _card_monitor_running:
+        return
+    _card_monitor_running = True
+
+    def _monitor_loop():
+        from .register import _check_payment_methods
+        while _card_monitor_running:
+            try:
+                time.sleep(30)  # 每 30 秒检查一次
+
+                # 收集当前标记为 "unbound" 且有活跃浏览器的账号
+                targets = []
+                with state.lock:
+                    for tid, br in list(state.browsers.items()):
+                        task_info = state.tasks.get(tid, {})
+                        email = task_info.get("email", "")
+                        if not email:
+                            continue
+
+                        # 查找该 email 在 history 中的绑卡状态
+                        hist = None
+                        for h in state.history:
+                            if h.get("email") == email:
+                                hist = h
+                                break
+                        if not hist:
+                            continue
+
+                        # 只监测 "unbound" 的（已绑卡的不需要反复检查）
+                        if hist.get("card_status") != "unbound":
+                            continue
+
+                        targets.append((tid, br, email))
+
+                for tid, br, email in targets:
+                    try:
+                        tab = br.latest_tab
+                        # 验证浏览器存活并获取当前 URL
+                        current_url = tab.url or ""
+                    except Exception:
+                        # 浏览器已死，清理引用
+                        with state.lock:
+                            state.browsers.pop(tid, None)
+                            state.tasks.pop(tid, None)
+                        continue
+
+                    try:
+                        # 只在 tokens/payment 相关页面就地检测（navigate=False）
+                        # 绝不强制导航 —— 避免打断用户正在操作的绑卡页面
+                        if "tokens" in current_url or "payment" in current_url or "account.jetbrains.com" in current_url:
+                            has_card, detail = _check_payment_methods(tab, navigate=False)
+                            if has_card:
+                                logger.info(f"[CardMonitor] {email} 绑卡状态变更: unbound → bound ({detail})")
+                                _update_card_status(email, "bound", detail)
+                    except Exception as e:
+                        logger.debug(f"[CardMonitor] 检查 {email} 失败: {e}")
+
+            except Exception as e:
+                logger.debug(f"[CardMonitor] 监测循环异常: {e}")
+
+    thread = threading.Thread(target=_monitor_loop, daemon=True, name="card-monitor")
+    thread.start()
+    logger.info("[CardMonitor] 后台绑卡状态监测线程已启动")
+
+
 @app.on_event("startup")
 async def _on_startup():
     global _event_loop
@@ -127,6 +243,8 @@ async def _on_startup():
     logger.info(f"已加载 {len(state.history)} 条历史成功记录")
     # 注意：不再在启动时自动清理浏览器数据目录，避免误杀正在运行的浏览器
     # 清理操作改为用户通过「关闭所有浏览器」按钮手动触发
+    # 启动后台绑卡状态监测线程
+    _start_card_monitor()
 
 
 @app.websocket("/ws")
@@ -160,8 +278,11 @@ class StartRequest(BaseModel):
     password: str = config.DEFAULT_PASSWORD
     first_name: str = config.DEFAULT_FIRST_NAME
     last_name: str = config.DEFAULT_LAST_NAME
-    browser: str = "chrome"  # chrome / edge / brave
+    browser: str = "chrome"  # chrome / edge / fingerprint
     country: str = "JP"      # tokens 页选择的国家代码
+    incognito: bool = True   # 是否使用隐私模式
+    auto_select_country: bool = True   # 注册后自动选择国家
+    auto_click_add_card: bool = True   # 选国家后自动点 Add credit card
 
 
 class FillCardRequest(BaseModel):
@@ -212,7 +333,8 @@ async def start_registration(req: StartRequest):
 
     thread = threading.Thread(
         target=_run_batch,
-        args=(req.count, req.password, req.first_name, req.last_name, req.browser, req.country),
+        args=(req.count, req.password, req.first_name, req.last_name, req.browser, req.country, req.incognito,
+              req.auto_select_country, req.auto_click_add_card),
         daemon=True,
     )
     thread.start()
@@ -279,11 +401,211 @@ async def delete_history(req: DeleteHistoryRequest):
     return {"ok": True, "deleted": count, "remaining": len(state.history)}
 
 
+class ImportRequest(BaseModel):
+    text: str = ""               # 原始文本（多行，支持多种格式）
+    default_password: str = ""   # 如果文本中没有密码，使用此默认密码
+    card_status: str = "unbound" # 导入后的绑卡状态: "unbound" | "" (未检测)
+
+
+@app.post("/api/history/import")
+async def import_accounts(req: ImportRequest):
+    """
+    导入账号到历史记录。
+    支持格式（每行一个账号）:
+      - email / password
+      - email password
+      - email,password
+      - email:password
+      - email / password / 其他信息（忽略多余字段）
+      - 纯邮箱（使用 default_password）
+    自动去重：已存在的邮箱跳过。
+    """
+    import re as _re
+
+    raw = req.text.strip()
+    if not raw:
+        return {"ok": False, "error": "请输入账号信息"}
+
+    lines = [l.strip() for l in raw.splitlines() if l.strip()]
+
+    # 解析每一行
+    parsed = []
+    parse_errors = []
+    for line_no, line in enumerate(lines, 1):
+        # 跳过注释行和标题行
+        if line.startswith("#") or line.startswith("//"):
+            continue
+        lower = line.lower()
+        if lower.startswith("email") and ("password" in lower or "密码" in lower):
+            continue  # CSV 标题行
+
+        email = ""
+        password = ""
+
+        # 尝试多种分隔符: " / ", ",", ":", 空格, tab
+        parts = None
+        for sep in [" / ", "\t", ",", ":", " "]:
+            if sep in line:
+                parts = [p.strip() for p in line.split(sep) if p.strip()]
+                break
+
+        if parts and len(parts) >= 2:
+            # 找出哪个是邮箱
+            for p in parts:
+                if "@" in p and "." in p:
+                    email = p
+                    break
+            if email:
+                # 密码是紧跟邮箱之后的字段
+                idx = parts.index(email)
+                if idx + 1 < len(parts):
+                    password = parts[idx + 1]
+            else:
+                # 第一个当邮箱，第二个当密码
+                email = parts[0]
+                password = parts[1]
+        elif parts and len(parts) == 1:
+            email = parts[0]
+        else:
+            email = line
+
+        # 清理邮箱
+        email = email.strip().lower()
+        if not email or "@" not in email:
+            parse_errors.append(f"第{line_no}行无法识别: {line[:50]}")
+            continue
+
+        # 密码兜底
+        if not password:
+            password = req.default_password or config.DEFAULT_PASSWORD
+
+        parsed.append({"email": email, "password": password})
+
+    if not parsed:
+        return {
+            "ok": False,
+            "error": f"未识别到任何有效账号" + (f"（{len(parse_errors)} 行解析失败）" if parse_errors else ""),
+            "errors": parse_errors[:10],
+        }
+
+    # 去重：跳过已存在的邮箱
+    existing = {h.get("email", "").lower() for h in state.history}
+    new_accounts = []
+    skipped = 0
+    for acc in parsed:
+        if acc["email"] in existing:
+            skipped += 1
+            continue
+        existing.add(acc["email"])  # 防止导入文本内部重复
+        new_accounts.append(acc)
+
+    if not new_accounts:
+        return {
+            "ok": True,
+            "imported": 0,
+            "skipped": skipped,
+            "message": f"所有 {skipped} 个账号已存在，无需导入",
+        }
+
+    # 写入 history
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    with _file_lock:
+        for acc in new_accounts:
+            account = {
+                "id": len(state.history) + 1,
+                "email": acc["email"],
+                "password": acc["password"],
+                "time": now,
+                "card_status": req.card_status or "",
+                "card_detail": "",
+                "card_check_time": "",
+            }
+            state.history.append(account)
+
+        # 持久化 JSON
+        ACCOUNTS_JSON.write_text(
+            json.dumps(state.history, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        # 追加 CSV
+        csv_exists = ACCOUNTS_CSV.exists() and ACCOUNTS_CSV.stat().st_size > 0
+        with open(ACCOUNTS_CSV, "a", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            if not csv_exists:
+                writer.writerow(["#", "email", "password", "time"])
+            for acc in new_accounts:
+                writer.writerow([
+                    len(state.history),
+                    acc["email"],
+                    acc["password"],
+                    now,
+                ])
+
+    # 广播
+    _broadcast_from_thread({"type": "history_update", "history": state.history})
+
+    msg = f"成功导入 {len(new_accounts)} 个账号"
+    if skipped:
+        msg += f"，跳过 {skipped} 个已存在"
+    if parse_errors:
+        msg += f"，{len(parse_errors)} 行解析失败"
+
+    return {
+        "ok": True,
+        "imported": len(new_accounts),
+        "skipped": skipped,
+        "errors": parse_errors[:10],
+        "message": msg,
+    }
+
+
 @app.post("/api/stop")
 async def stop_registration():
     state.running = False
+    # 清除所有进行中的任务状态，防止卡在 "已有任务在运行"
+    with state.lock:
+        for tid, task in state.tasks.items():
+            if task.get("success") is None:
+                task["success"] = False
+                task["error"] = "用户停止"
+                task["step_label"] = "已停止"
     _broadcast_from_thread({"type": "stopped"})
     return {"ok": True}
+
+
+# ── API Key 配置 ──
+
+class ApiKeyRequest(BaseModel):
+    api_key: str = ""
+
+
+@app.get("/api/settings")
+async def get_settings():
+    """获取当前设置（含 API Key 脱敏显示）"""
+    key = config.YYDS_API_KEY
+    masked = ""
+    if key:
+        if len(key) > 10:
+            masked = key[:6] + "****" + key[-4:]
+        else:
+            masked = key[:3] + "****"
+    return {"api_key_masked": masked, "api_key_set": bool(key)}
+
+
+@app.post("/api/settings/api-key")
+async def set_api_key(req: ApiKeyRequest):
+    """保存 YYDS Mail API Key"""
+    key = req.api_key.strip()
+    if not key:
+        return {"ok": False, "error": "API Key 不能为空"}
+    if not key.startswith("AC-"):
+        return {"ok": False, "error": "API Key 格式不对，应以 AC- 开头"}
+    try:
+        config.save_api_key(key)
+        return {"ok": True, "message": "API Key 已保存"}
+    except Exception as e:
+        return {"ok": False, "error": f"保存失败: {e}"}
 
 
 # ── 延迟配置 API ──
@@ -319,42 +641,88 @@ async def update_config(req: UpdateConfigRequest):
 
 @app.post("/api/kill-all-browsers")
 async def kill_all_browsers():
-    """一键关闭所有由 JetBrainsReg 管理的浏览器（扫描到的 debug 端口浏览器 + 注册保留的浏览器）"""
+    """一键关闭所有由 JetBrainsReg 管理的浏览器 + 系统中所有带 debug 端口的浏览器进程"""
+    import subprocess
     killed = 0
     errors = []
 
-    # 1. 关闭注册时保留的浏览器
+    # 1. 清空 state.browsers（不调用 browser.quit，直接丢弃引用）
     with state.lock:
-        for task_id, browser in list(state.browsers.items()):
-            try:
-                browser.quit()
-                killed += 1
-                logger.info(f"[KillAll] 已关闭 JetBrainsReg #{task_id}")
-            except Exception as e:
-                errors.append(f"JetBrainsReg #{task_id}: {e}")
+        browser_count = len(state.browsers)
         state.browsers.clear()
+    if browser_count:
+        logger.info(f"[KillAll] 已清除 {browser_count} 个浏览器引用")
 
-    # 2. 关闭所有扫描到的 debug 端口浏览器
-    scanned = scan_debug_browsers()
-    for info in scanned:
-        port = info["port"]
-        try:
-            browser = connect_browser_by_port(port)
-            browser.quit()
-            killed += 1
-            logger.info(f"[KillAll] 已关闭端口 {port} 浏览器")
-        except Exception as e:
-            errors.append(f"port:{port}: {e}")
-
-    # 3. 清理残余的浏览器数据目录
+    # 2. 扫描所有带 --remote-debugging-port 的浏览器进程的 PID，直接 taskkill
     try:
-        cleanup_stale_data_dirs()
-    except Exception as e:
-        logger.warning(f"[KillAll] 清理数据目录失败: {e}")
+        ps_script = (
+            'Get-WmiObject Win32_Process -Filter "name=\'chrome.exe\' or name=\'msedge.exe\'" '
+            '| Where-Object { $_.CommandLine -match \'--remote-debugging-port\' } '
+            '| Select-Object -ExpandProperty ProcessId'
+        )
+        raw = subprocess.check_output(
+            ["powershell", "-NoProfile", "-Command", ps_script],
+            timeout=10, stderr=subprocess.DEVNULL
+        ).decode("utf-8", errors="ignore")
 
-    msg = f"已关闭 {killed} 个浏览器"
+        pids = set()
+        for line in raw.strip().splitlines():
+            line = line.strip()
+            if line.isdigit():
+                pids.add(int(line))
+
+        if pids:
+            # 用 taskkill /F /PID 批量强杀（快速、不等待）
+            pid_args = []
+            for pid in pids:
+                pid_args.extend(["/PID", str(pid)])
+            try:
+                subprocess.run(
+                    ["taskkill", "/F"] + pid_args,
+                    timeout=10, capture_output=True
+                )
+                killed = len(pids)
+                logger.info(f"[KillAll] taskkill 强制关闭 {killed} 个进程: {pids}")
+            except Exception as e:
+                errors.append(f"taskkill 失败: {e}")
+                # 逐个杀
+                for pid in pids:
+                    try:
+                        subprocess.run(["taskkill", "/F", "/PID", str(pid)], timeout=5, capture_output=True)
+                        killed += 1
+                    except Exception:
+                        pass
+        else:
+            logger.info("[KillAll] 未发现带 debug 端口的浏览器进程")
+    except Exception as e:
+        errors.append(f"扫描进程失败: {e}")
+        logger.warning(f"[KillAll] 扫描进程失败: {e}")
+
+    # 3. 同时重置运行状态（防止卡在 "已有任务在运行"）
+    if state.running:
+        state.running = False
+        with state.lock:
+            for tid, task in state.tasks.items():
+                if task.get("success") is None:
+                    task["success"] = False
+                    task["error"] = "浏览器已关闭"
+                    task["step_label"] = "已终止"
+        _broadcast_from_thread({"type": "stopped"})
+        logger.info("[KillAll] 已重置运行状态")
+
+    # 4. 后台清理数据目录（不阻塞返回）
+    def _bg_cleanup():
+        import time as _t
+        _t.sleep(2)  # 等进程完全退出
+        try:
+            cleanup_stale_data_dirs()
+        except Exception:
+            pass
+    threading.Thread(target=_bg_cleanup, daemon=True).start()
+
+    msg = f"已强制关闭 {killed} 个浏览器进程"
     if errors:
-        msg += f"，{len(errors)} 个失败"
+        msg += f"，{len(errors)} 个操作失败"
 
     return {"ok": True, "message": msg, "killed": killed, "errors": errors}
 
@@ -393,7 +761,8 @@ async def force_start_registration(req: StartRequest):
 
     thread = threading.Thread(
         target=_run_batch_force,
-        args=(start_id, req.count, req.password, req.first_name, req.last_name, req.browser, req.country),
+        args=(start_id, req.count, req.password, req.first_name, req.last_name, req.browser, req.country, req.incognito,
+              req.auto_select_country, req.auto_click_add_card),
         daemon=True,
     )
     thread.start()
@@ -447,6 +816,215 @@ async def get_browsers():
                 del state.browsers[task_id]
 
     return scanned
+
+
+class CheckCardRequest(BaseModel):
+    accounts: list[dict]  # [{email, password}, ...]
+
+
+@app.post("/api/check-card")
+async def check_card_binding(req: CheckCardRequest):
+    """检测已注册账号是否已绑定银行卡。
+    优先使用已打开的浏览器检查；如果没有已打开的浏览器，引导使用一键登录+检测功能。
+    """
+    results = []
+    no_browser_count = 0
+
+    for acc in req.accounts[:20]:
+        email = acc.get("email", "")
+        password = acc.get("password", "")
+        result = {"email": email, "has_card": False, "error": ""}
+
+        try:
+            # 查找已打开的浏览器（匹配 email 或扫描系统浏览器）
+            found_browser = None
+            with state.lock:
+                for tid, br in state.browsers.items():
+                    task_email = state.tasks.get(tid, {}).get("email", "")
+                    if task_email == email:
+                        # 验证浏览器仍然存活
+                        try:
+                            _ = br.latest_tab.url
+                            found_browser = br
+                            break
+                        except Exception:
+                            # 浏览器已死，清理引用
+                            del state.browsers[tid]
+                            break
+
+            if found_browser:
+                try:
+                    from .register import _check_payment_methods
+                    tab = found_browser.latest_tab
+                    has_card, detail = _check_payment_methods(tab, navigate=True)
+                    result["has_card"] = has_card
+                    result["detail"] = detail
+                    # 持久化绑卡状态
+                    _update_card_status(email, "bound" if has_card else "unbound", detail)
+                except Exception as e:
+                    result["error"] = str(e)[:80]
+            else:
+                no_browser_count += 1
+                result["error"] = "无已打开的浏览器窗口，请使用「一键登录+检测」功能"
+
+        except Exception as e:
+            result["error"] = str(e)[:80]
+
+        results.append(result)
+
+    # 如果所有账号都没有浏览器，给出更明确的提示
+    all_failed = all(r.get("error") for r in results)
+    return {
+        "ok": not all_failed,
+        "results": results,
+        "hint": "浏览器已关闭，请使用历史记录中的「一键登录+检测」按钮" if no_browser_count == len(results) else "",
+    }
+
+
+# ── 一键登录 + 检测绑卡 API ──
+
+class LoginCheckRequest(BaseModel):
+    accounts: list[dict] = []     # [{email, password}, ...]  空 = 全部历史账号
+    browser: str = "chrome"       # chrome / edge / fingerprint
+    goto_card_page: bool = True   # 未绑卡的自动跳转到绑卡页
+    country: str = "JP"           # tokens 页选择的国家代码
+    incognito: bool = True
+
+
+# 一键登录的进行中状态
+_login_state = {
+    "running": False,
+    "progress": [],    # [{email, status, has_card, card_detail, error}, ...]
+    "total": 0,
+    "done": 0,
+}
+
+
+@app.post("/api/login-and-check")
+async def login_and_check_api(req: LoginCheckRequest):
+    """一键登录已注册账号并检测绑卡状态（新开浏览器，不依赖已打开的窗口）"""
+    if _login_state["running"]:
+        return {"ok": False, "error": "已有登录任务在运行中，请等待完成"}
+
+    # 确定要登录的账号列表
+    accounts = req.accounts
+    if not accounts:
+        # 没指定则用历史记录中的全部账号
+        accounts = [{"email": h["email"], "password": h["password"]} for h in state.history]
+    if not accounts:
+        return {"ok": False, "error": "没有可登录的账号"}
+
+    # 限制数量
+    if len(accounts) > 20:
+        return {"ok": False, "error": f"单次最多登录 20 个账号，当前 {len(accounts)} 个"}
+
+    _login_state["running"] = True
+    _login_state["total"] = len(accounts)
+    _login_state["done"] = 0
+    _login_state["progress"] = [
+        {"email": a["email"], "status": "pending", "has_card": False, "card_detail": "", "error": ""}
+        for a in accounts
+    ]
+
+    # 广播开始
+    _broadcast_from_thread({
+        "type": "login_started",
+        "total": len(accounts),
+        "progress": _login_state["progress"],
+    })
+
+    _done_counter = [0]  # 用列表包装以支持闭包修改
+    _counter_lock = threading.Lock()
+
+    def _run():
+        try:
+            def on_progress(i, total, result: LoginResult):
+                # 并发模式下 i 不是递增的，用独立计数器
+                with _counter_lock:
+                    _done_counter[0] += 1
+                    done_now = _done_counter[0]
+
+                _login_state["done"] = done_now
+                _login_state["progress"][i] = {
+                    "email": result.email,
+                    "status": "done" if result.login_ok else ("error" if result.error else "done"),
+                    "login_ok": result.login_ok,
+                    "has_card": result.has_card,
+                    "card_detail": result.card_detail,
+                    "error": result.error,
+                    "port": result.port,
+                    "country": result.country,
+                    "country_name": result.country_name,
+                }
+
+                # 持久化绑卡状态 + 国家到 history
+                if result.login_ok:
+                    card_st = "bound" if result.has_card else "unbound"
+                    _update_card_status(result.email, card_st, result.card_detail or "")
+                    # 持久化国家信息
+                    if result.country:
+                        _update_country(result.email, result.country, result.country_name)
+                elif result.error:
+                    # 登录失败不覆盖已有的绑卡状态（可能之前检测过）
+                    pass
+
+                # 保留浏览器实例到全局（供一键填卡使用）
+                if result.browser and result.port:
+                    with state.lock:
+                        login_tid = -(i + 1000)
+                        state.browsers[login_tid] = result.browser
+                        state.tasks[login_tid] = {
+                            "task_id": login_tid,
+                            "step": 9,
+                            "step_label": "已登录" if result.login_ok else "登录失败",
+                            "email": result.email,
+                            "password": result.password,
+                            "success": result.login_ok,
+                            "error": result.error,
+                        }
+
+                # 广播进度
+                _broadcast_from_thread({
+                    "type": "login_progress",
+                    "index": i,
+                    "total": total,
+                    "done": done_now,
+                    "result": _login_state["progress"][i],
+                    "progress": _login_state["progress"],
+                })
+
+            login_batch(
+                accounts=accounts,
+                browser_type=req.browser,
+                goto_card_page=req.goto_card_page,
+                country=req.country,
+                incognito=req.incognito,
+                on_progress=on_progress,
+            )
+        except Exception as e:
+            logger.error(f"[LoginBatch] 异常: {e}", exc_info=True)
+        finally:
+            _login_state["running"] = False
+            _broadcast_from_thread({
+                "type": "login_completed",
+                "progress": _login_state["progress"],
+            })
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+
+    return {"ok": True, "total": len(accounts), "message": f"开始登录 {len(accounts)} 个账号..."}
+
+
+@app.get("/api/login-status")
+async def get_login_status():
+    """获取一键登录的进度"""
+    return {
+        "running": _login_state["running"],
+        "total": _login_state["total"],
+        "done": _login_state["done"],
+        "progress": _login_state["progress"],
+    }
 
 
 @app.post("/api/fill-card")
@@ -643,7 +1221,7 @@ async def confirm_card_api(req: CardActionRequest):
 
 # ── Worker 逻辑 ──
 
-def _make_status_callback(task_id: int):
+def _make_status_callback(task_id: int, country: str = ""):
     def callback(status: TaskStatus):
         task_dict = {
             "task_id": status.task_id,
@@ -661,15 +1239,20 @@ def _make_status_callback(task_id: int):
 
                 # 成功的持久化保存
                 if status.success:
+                    # 国家代码 → 国家名称
+                    from .register import _get_country_name
+                    country_name = _get_country_name(country) if country else ""
                     account = {
                         "id": len(state.history) + 1,
                         "email": status.email,
                         "password": status.password,
                         "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "country": country.upper() if country else "",
+                        "country_name": country_name,
                     }
                     state.history.append(account)
                     _save_account(account)
-                    logger.info(f"[Task {task_id}] 账号已保存: {status.email}")
+                    logger.info(f"[Task {task_id}] 账号已保存: {status.email} ({country})")
 
         _broadcast_from_thread({
             "type": "task_update",
@@ -679,41 +1262,43 @@ def _make_status_callback(task_id: int):
     return callback
 
 
-def _run_batch(count: int, password: str, first_name: str, last_name: str, browser: str = "chrome", country: str = "JP"):
-    with ThreadPoolExecutor(max_workers=count) as executor:
-        futures = {}
-        for i in range(1, count + 1):
-            if not state.running:
-                break
-            future = executor.submit(
-                _run_single_task, i, password, first_name, last_name, browser, country
-            )
-            futures[future] = i
-            # 错开浏览器启动时间，避免同时启动导致资源争抢和连接超时
-            if i < count:
-                import time as _t
-                _t.sleep(config.DELAY_BROWSER_STAGGER)
+def _run_batch(count: int, password: str, first_name: str, last_name: str, browser: str = "chrome", country: str = "JP", incognito: bool = True, auto_select_country: bool = True, auto_click_add_card: bool = True):
+    try:
+        with ThreadPoolExecutor(max_workers=count) as executor:
+            futures = {}
+            for i in range(1, count + 1):
+                if not state.running:
+                    break
+                future = executor.submit(
+                    _run_single_task, i, password, first_name, last_name, browser, country, incognito,
+                    auto_select_country, auto_click_add_card
+                )
+                futures[future] = i
+                if i < count:
+                    import time as _t
+                    _t.sleep(config.DELAY_BROWSER_STAGGER)
 
-        for future in futures:
-            try:
-                future.result()
-            except Exception as e:
-                task_id = futures[future]
-                logger.error(f"[Task {task_id}] 未捕获异常: {e}")
+            for future in futures:
+                try:
+                    future.result()
+                except Exception as e:
+                    task_id = futures[future]
+                    logger.error(f"[Task {task_id}] 未捕获异常: {e}")
+    except Exception as e:
+        logger.error(f"[Batch] 批量任务异常退出: {e}")
+    finally:
+        # 确保 running 状态一定被重置
+        state.running = False
+        _broadcast_from_thread({
+            "type": "completed",
+            "results": state.results,
+            "history": state.history,
+        })
+        logger.info("批量注册全部完成")
 
-    state.running = False
 
-    _broadcast_from_thread({
-        "type": "completed",
-        "results": state.results,
-        "history": state.history,
-    })
-
-    logger.info("批量注册全部完成")
-
-
-def _run_single_task(task_id: int, password: str, first_name: str, last_name: str, browser: str = "chrome", country: str = "JP"):
-    callback = _make_status_callback(task_id)
+def _run_single_task(task_id: int, password: str, first_name: str, last_name: str, browser: str = "chrome", country: str = "JP", incognito: bool = True, auto_select_country: bool = True, auto_click_add_card: bool = True):
+    callback = _make_status_callback(task_id, country=country)
     result = register_one(
         task_id=task_id,
         password=password,
@@ -723,6 +1308,9 @@ def _run_single_task(task_id: int, password: str, first_name: str, last_name: st
         country=country,
         on_status=callback,
         cancel_check=lambda: not state.running,
+        incognito=incognito,
+        auto_select_country=auto_select_country,
+        auto_click_add_card=auto_click_add_card,
     )
     # 保留浏览器实例引用（无论成功失败），供一键填卡使用或用户手动操作
     if result.browser:
@@ -734,42 +1322,44 @@ def _run_single_task(task_id: int, password: str, first_name: str, last_name: st
             logger.info(f"[Task {task_id}] 浏览器实例已保留（注册失败，保留供检查）")
 
 
-def _run_batch_force(start_id: int, count: int, password: str, first_name: str, last_name: str, browser: str = "chrome", country: str = "JP"):
+def _run_batch_force(start_id: int, count: int, password: str, first_name: str, last_name: str, browser: str = "chrome", country: str = "JP", incognito: bool = True, auto_select_country: bool = True, auto_click_add_card: bool = True):
     """强制启动模式的批量任务：不清空已有任务，追加新任务"""
-    with ThreadPoolExecutor(max_workers=count) as executor:
-        futures = {}
-        for i in range(count):
-            tid = start_id + i
-            if not state.running:
-                break
-            future = executor.submit(
-                _run_single_task, tid, password, first_name, last_name, browser, country
-            )
-            futures[future] = tid
-            # 错开浏览器启动时间
-            if i < count - 1:
-                import time as _t
-                _t.sleep(config.DELAY_BROWSER_STAGGER)
+    try:
+        with ThreadPoolExecutor(max_workers=count) as executor:
+            futures = {}
+            for i in range(count):
+                tid = start_id + i
+                if not state.running:
+                    break
+                future = executor.submit(
+                    _run_single_task, tid, password, first_name, last_name, browser, country, incognito,
+                    auto_select_country, auto_click_add_card
+                )
+                futures[future] = tid
+                if i < count - 1:
+                    import time as _t
+                    _t.sleep(config.DELAY_BROWSER_STAGGER)
 
-        for future in futures:
-            try:
-                future.result()
-            except Exception as e:
-                task_id = futures[future]
-                logger.error(f"[Task {task_id}] 未捕获异常: {e}")
+            for future in futures:
+                try:
+                    future.result()
+                except Exception as e:
+                    task_id = futures[future]
+                    logger.error(f"[Task {task_id}] 未捕获异常: {e}")
+    except Exception as e:
+        logger.error(f"[BatchForce] 批量任务异常退出: {e}")
+    finally:
+        # 检查是否还有进行中的任务
+        has_pending = any(
+            t.get("success") is None and t.get("step", 0) > 0
+            for t in state.tasks.values()
+        )
+        if not has_pending:
+            state.running = False
 
-    # 检查是否还有进行中的任务
-    has_pending = any(
-        t.get("success") is None and t.get("step", 0) > 0
-        for t in state.tasks.values()
-    )
-    if not has_pending:
-        state.running = False
-
-    _broadcast_from_thread({
-        "type": "completed",
-        "results": state.results,
-        "history": state.history,
-    })
-
-    logger.info(f"强制启动批次完成 (start_id={start_id}, count={count})")
+        _broadcast_from_thread({
+            "type": "completed",
+            "results": state.results,
+            "history": state.history,
+        })
+        logger.info(f"强制启动批次完成 (start_id={start_id}, count={count})")

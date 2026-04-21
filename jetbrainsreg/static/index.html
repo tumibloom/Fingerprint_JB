@@ -148,6 +148,14 @@ input,select,button,textarea{font-family:inherit}
 .theme-card.active{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-bg)}
 .theme-card .preview{height:28px;border-radius:6px;margin-bottom:8px}
 
+/* ═══ Favorite Country Tags ═══ */
+.fav-tag{display:inline-flex;align-items:center;gap:3px;padding:3px 9px;border-radius:5px;font-size:12px;font-weight:500;cursor:pointer;border:1px solid var(--border);background:var(--input-bg);color:var(--text-secondary);transition:all .15s;user-select:none;line-height:1.4}
+.fav-tag:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-bg)}
+.fav-tag.active{border-color:var(--accent);background:var(--accent);color:#fff}
+.fav-tag .fav-code{font-size:10px;opacity:.7}
+.fav-tag .fav-rm{font-size:13px;margin-left:1px;opacity:.4;cursor:pointer;line-height:1}
+.fav-tag .fav-rm:hover{opacity:1;color:var(--error)}
+
 @media(max-width:768px){
   .task-card{grid-template-columns:40px 1fr 110px}.t-pwd{display:none}
   .summary{grid-template-columns:repeat(2,1fr)}
@@ -174,18 +182,31 @@ input,select,button,textarea{font-family:inherit}
   <!-- 控制面板 -->
   <div class="panel">
     <div class="panel-head"><span class="panel-title">控制面板</span></div>
+    <!-- YYDS Mail API Key -->
+    <div class="row" style="margin-bottom:6px">
+      <div class="fg" style="flex:3"><label>邮箱 API Key <a href="https://vip.215.im/api-keys" target="_blank" style="font-size:11px;color:var(--accent);text-decoration:none" title="点击前往 YYDS Mail 获取 API Key">获取Key</a></label>
+        <div style="display:flex;gap:6px;align-items:stretch">
+          <input type="password" id="apiKeyInput" placeholder="AC-xxxxxxxx（首次使用必填）" style="flex:1;font-family:monospace">
+          <button class="btn btn-accent btn-sm" onclick="saveApiKey()" style="padding:6px 14px;white-space:nowrap">保存</button>
+        </div>
+      </div>
+      <div class="fg" style="flex:0;min-width:auto;align-self:flex-end;padding-bottom:4px">
+        <span id="apiKeyStatus" style="font-size:12px;color:var(--muted);white-space:nowrap">检查中...</span>
+      </div>
+    </div>
     <div class="row">
       <div class="fg" style="flex:2"><label>统一密码</label><input type="text" id="password" value="hajimi123"></div>
       <div class="fg"><label>浏览器</label><select id="browser"><option value="fingerprint">指纹浏览器</option><option value="chrome">Chrome</option><option value="edge">Edge</option></select></div>
+      <div class="fg" style="flex:0;min-width:auto;align-self:center;padding-top:20px"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap;font-size:14px;color:var(--text)"><input type="checkbox" id="incognito" checked style="width:18px;height:18px;accent-color:var(--accent)"> 隐私模式</label></div>
     </div>
     <div class="hint" style="margin-top:-10px;margin-bottom:10px">* 所有账号统一使用此密码</div>
+    <input type="hidden" id="country" value="JP">
     <div class="row">
       <div class="fg" style="flex:.6;min-width:90px"><label>窗口数</label><input type="number" id="count" value="3" min="1" max="10"></div>
       <div class="fg" style="flex:1.5;min-width:160px"><label>账号国家</label>
         <div style="display:flex;gap:6px;align-items:stretch">
-          <input type="hidden" id="country" value="JP">
           <div class="country-wrap">
-            <input type="text" id="countryInput" value="Japan" placeholder="输入搜索国家..." autocomplete="off" onfocus="openCountryDrop()" oninput="filterCountry()">
+            <input type="text" id="countryInput" value="Japan" placeholder="搜索国家..." autocomplete="off" onfocus="openCountryDrop()" oninput="filterCountry()">
             <div class="country-drop" id="countryDrop"></div>
           </div>
           <button class="btn btn-outline btn-sm" onclick="randomCountry()" title="随机选择国家" style="padding:6px 10px;white-space:nowrap">随机</button>
@@ -195,12 +216,27 @@ input,select,button,textarea{font-family:inherit}
       <div class="fg"><label>Last Name</label><input type="text" id="lastName" value=""></div>
       <div class="fg" style="flex:0;min-width:auto"><label>&nbsp;</label><button class="btn btn-outline btn-sm" onclick="randomName()">随机</button></div>
     </div>
+    <!-- 国家模式切换 + 注册后自动操作开关 -->
+    <div style="display:flex;align-items:center;gap:14px;margin:-6px 0 10px;padding-left:2px;font-size:13px;flex-wrap:wrap">
+      <label style="display:flex;align-items:center;gap:4px;cursor:pointer;color:var(--text-secondary)"><input type="radio" name="countryMode" value="custom" checked onchange="switchCountryMode('custom')" style="accent-color:var(--accent)"> 自选</label>
+      <label style="display:flex;align-items:center;gap:4px;cursor:pointer;color:var(--text-secondary)"><input type="radio" name="countryMode" value="fav" onchange="switchCountryMode('fav')" style="accent-color:var(--accent)"> 常用</label>
+      <div id="countryCustomPanel" style="display:flex;align-items:center">
+        <button class="btn btn-outline btn-sm" onclick="addToFavorites()" title="将当前国家加入常用列表" style="padding:3px 10px;font-size:12px">★ 加入常用</button>
+      </div>
+      <div id="countryFavPanel" style="display:none;flex:1;min-width:0">
+        <div id="favCountryList" style="display:flex;flex-wrap:wrap;gap:5px;align-items:center"></div>
+      </div>
+      <span style="border-left:1px solid var(--border);height:16px;margin:0 2px"></span>
+      <label style="display:flex;align-items:center;gap:4px;cursor:pointer;color:var(--text-secondary)" title="注册成功后自动在 tokens 页选择国家"><input type="checkbox" id="autoSelectCountry" checked style="accent-color:var(--accent)"> 自动选国家</label>
+      <label style="display:flex;align-items:center;gap:4px;cursor:pointer;color:var(--text-secondary)" title="选完国家后自动点击 Add credit card 打开绑卡表单"><input type="checkbox" id="autoClickAddCard" checked style="accent-color:var(--accent)"> 自动点绑卡</label>
+    </div>
     <div style="font-size:13px;color:var(--muted);margin-bottom:14px">每个窗口自动生成独立的随机英文名，无需手动修改</div>
     <div class="btn-row">
       <button class="btn btn-accent" id="btnStart" onclick="startReg()">开始注册</button>
       <button class="btn btn-outline" id="btnStop" onclick="stopReg()" style="display:none">停止</button>
       <button class="btn btn-warn btn-sm" id="btnForceStart" onclick="forceStartReg()" style="display:none" title="无视已有任务，强制新建窗口">强制新建窗口</button>
-      <button class="btn btn-danger btn-sm ml-auto" id="btnKillAll" onclick="killAllBrowsers()" title="关闭所有托管的浏览器窗口">关闭所有浏览器</button>
+      <button class="btn btn-outline btn-sm" id="btnForceReset" onclick="forceReset()" style="display:none;border-color:var(--error);color:var(--error)" title="强制重置运行状态（卡住时使用）">强制重置</button>
+      <button class="btn btn-danger btn-sm ml-auto" id="btnKillAll" onclick="killAllBrowsers()" title="强制杀死所有浏览器进程 + 重置运行状态">关闭所有浏览器</button>
     </div>
   </div>
 
@@ -273,12 +309,31 @@ input,select,button,textarea{font-family:inherit}
   <div class="panel" style="margin-top:20px" id="historyPanel">
     <div class="panel-head">
       <span class="panel-title">已注册账号（永久保存）</span>
-      <div style="display:flex;gap:6px" id="historyActions">
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center" id="historyActions">
         <button class="btn btn-outline btn-sm" onclick="toggleSelectAll()" id="btnSelectAll" style="display:none">全选</button>
+        <div id="rangeSelectWrap" style="display:none;align-items:center;gap:3px"><input type="text" id="rangeSelectInput" placeholder="1~10" style="width:68px;padding:5px 8px;font-size:12px;border-radius:6px;border:1px solid var(--border);background:var(--input-bg);color:var(--text);text-align:center" onkeydown="if(event.key==='Enter'){event.preventDefault();applyRangeSelect();}" title="输入序号范围，如 1~10、3~7、1,3,5"><button class="btn btn-outline btn-sm" onclick="applyRangeSelect()" style="padding:4px 8px;font-size:12px">选中</button></div>
+        <button class="btn btn-outline btn-sm" onclick="copySelected()" id="btnCopySelected" style="display:none">复制选中</button>
+        <button class="btn btn-outline btn-sm" onclick="copyAllAccounts()" id="btnCopyAll" style="display:none">复制全部</button>
+        <button class="btn btn-accent btn-sm" onclick="loginAndCheck()" id="btnLoginCheck" style="display:none" title="一键登录选中账号并检测绑卡状态（会打开新浏览器窗口）">一键登录+检测</button>
+        <button class="btn btn-outline btn-sm" onclick="loginAndCheck(true)" id="btnLoginAll" style="display:none" title="一键登录所有账号并检测绑卡状态">全部登录+检测</button>
+        <button class="btn btn-outline btn-sm" onclick="openImportModal()" id="btnImport" title="导入已有账号到列表">导入账号</button>
         <button class="btn btn-sm" onclick="deleteSelected()" id="btnDeleteSelected" style="display:none;background:var(--error-bg);color:var(--error);border:1px solid var(--error)">删除选中</button>
       </div>
     </div>
     <div id="historyArea"><span style="color:var(--muted);font-size:13px">暂无记录</span></div>
+
+    <!-- 一键登录进度 -->
+    <div id="loginProgressPanel" style="display:none;margin-top:16px">
+      <div class="sep"></div>
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+        <span class="panel-title" style="font-size:14px">登录进度</span>
+        <span id="loginProgressText" style="font-size:13px;color:var(--text-secondary)"></span>
+      </div>
+      <div style="background:var(--bg-alt);border-radius:8px;overflow:hidden;height:6px;margin-bottom:12px">
+        <div id="loginProgressBar" style="height:100%;background:var(--accent);transition:width .3s;width:0%"></div>
+      </div>
+      <div id="loginProgressList" style="font-size:13px;line-height:1.8;max-height:200px;overflow-y:auto"></div>
+    </div>
   </div>
 </div>
 
@@ -314,6 +369,37 @@ input,select,button,textarea{font-family:inherit}
     <div class="btn-row" style="justify-content:flex-end;margin-top:16px">
       <button class="btn btn-outline btn-sm" onclick="resetDelays()">恢复默认</button>
       <button class="btn btn-accent" onclick="saveDelays()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 导入账号弹窗 -->
+<div class="modal-overlay" id="importOverlay" onclick="if(event.target===this)closeImportModal()">
+  <div class="modal" style="position:relative;width:min(640px,92vw)">
+    <button class="close-btn" onclick="closeImportModal()" style="position:absolute;top:16px;right:20px;background:none;border:none;color:var(--text-secondary);font-size:24px;cursor:pointer">&times;</button>
+    <h2>导入账号</h2>
+    <p style="font-size:13px;color:var(--text-secondary);margin-bottom:14px">将已注册的 JetBrains 账号导入到列表中，自动标记为「未绑卡」，方便后续一键登录 + 绑卡。</p>
+
+    <div style="margin-bottom:14px">
+      <label style="font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.4px">账号列表（每行一个）</label>
+      <textarea id="importText" style="width:100%;height:180px;margin-top:6px;padding:12px 16px;background:var(--input-bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:'JetBrains Mono',Consolas,monospace;font-size:13px;line-height:1.6;resize:vertical;outline:none" placeholder="支持以下格式，每行一个账号：&#10;&#10;email@example.com / password123&#10;email@example.com,password123&#10;email@example.com password123&#10;email@example.com:password123&#10;email@example.com（纯邮箱，使用下方默认密码）"></textarea>
+    </div>
+
+    <div class="row" style="margin-bottom:14px">
+      <div class="fg" style="flex:1.5"><label>默认密码（纯邮箱行使用）</label><input type="text" id="importDefaultPwd" value="hajimi123" placeholder="没有密码的行使用此密码"></div>
+      <div class="fg" style="flex:1"><label>导入后绑卡状态</label>
+        <select id="importCardStatus" style="padding:12px 16px;background:var(--input-bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:15px">
+          <option value="unbound">标记为「未绑卡」</option>
+          <option value="">不标记（未检测）</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="importResult" style="display:none;padding:10px 14px;border-radius:8px;font-size:13px;line-height:1.6;margin-bottom:14px"></div>
+
+    <div class="btn-row" style="justify-content:flex-end">
+      <button class="btn btn-outline" onclick="closeImportModal()">取消</button>
+      <button class="btn btn-accent" id="btnDoImport" onclick="doImport()">确认导入</button>
     </div>
   </div>
 </div>
@@ -411,7 +497,7 @@ const LN=['Smith','Johnson','Williams','Brown','Jones','Garcia','Miller','Davis'
 
 function randomName(){document.getElementById('firstName').value=FN[Math.floor(Math.random()*FN.length)];document.getElementById('lastName').value=LN[Math.floor(Math.random()*LN.length)];}
 function randomCardName(){document.getElementById('cardName').value=(FN[Math.floor(Math.random()*FN.length)]+' '+LN[Math.floor(Math.random()*LN.length)]).toUpperCase();}
-/* ═══ Searchable Country ═══ */
+/* ═══ Searchable Country + 双模式（自选/常用） ═══ */
 const COUNTRIES=[
 ['JP','Japan'],['US','United States'],['GB','United Kingdom'],['DE','Germany'],['FR','France'],
 ['KR','Republic of Korea'],['SG','Singapore'],['CA','Canada'],['AU','Australia'],['NL','Netherlands'],
@@ -432,6 +518,74 @@ const COUNTRIES=[
 ['AL','Albania'],['MD','Moldova'],['TT','Trinidad and Tobago'],['JM','Jamaica'],['MU','Mauritius'],
 ['GH','Ghana'],['TZ','Tanzania'],['SN','Senegal']
 ];
+const _C_MAP=Object.fromEntries(COUNTRIES); // code→name 快速查找
+
+// ── 常用国家列表（localStorage 持久化）──
+let favCountries=JSON.parse(localStorage.getItem('jbreg-fav-countries')||'[]'); // [{code,name}, ...]
+let favSelected=''; // 常用模式下当前选中的国家代码
+let countryMode='custom'; // 'custom' | 'fav'
+
+function _saveFavCountries(){localStorage.setItem('jbreg-fav-countries',JSON.stringify(favCountries));}
+
+function switchCountryMode(mode){
+  countryMode=mode;
+  document.getElementById('countryCustomPanel').style.display=mode==='custom'?'flex':'none';
+  document.getElementById('countryFavPanel').style.display=mode==='fav'?'':'none';
+  // 切换到常用模式时，如果有选中的常用国家就用它
+  if(mode==='fav'&&favCountries.length){
+    if(!favSelected||!favCountries.find(f=>f.code===favSelected)) favSelected=favCountries[0].code;
+    const fav=favCountries.find(f=>f.code===favSelected);
+    if(fav) pickCountry(fav.code,fav.name);
+    renderFavList();
+  }
+  localStorage.setItem('jbreg-country-mode',mode);
+}
+
+function addToFavorites(){
+  const code=document.getElementById('country').value;
+  const name=document.getElementById('countryInput').value||_C_MAP[code]||code;
+  if(!code){alert('请先选择一个国家');return;}
+  if(favCountries.find(f=>f.code===code)){alert(`${name} (${code}) 已在常用列表中`);return;}
+  favCountries.push({code,name});
+  _saveFavCountries();
+  renderFavList();
+  // 给出视觉反馈
+  const btn=event.target;btn.textContent='✓ 已添加';setTimeout(()=>{btn.textContent='★ 加常用';},1000);
+}
+
+function removeFavorite(code){
+  favCountries=favCountries.filter(f=>f.code!==code);
+  _saveFavCountries();
+  if(favSelected===code&&favCountries.length) favSelected=favCountries[0].code;
+  if(!favCountries.length) favSelected='';
+  renderFavList();
+  // 如果常用模式且还有国家，更新选中
+  if(countryMode==='fav'&&favSelected){
+    const fav=favCountries.find(f=>f.code===favSelected);
+    if(fav) pickCountry(fav.code,fav.name);
+  }
+}
+
+function selectFavorite(code){
+  favSelected=code;
+  const fav=favCountries.find(f=>f.code===code);
+  if(fav) pickCountry(fav.code,fav.name);
+  renderFavList();
+}
+
+function renderFavList(){
+  const el=document.getElementById('favCountryList');
+  if(!favCountries.length){
+    el.innerHTML='<span style="color:var(--muted);font-size:12px">切换到自选模式，点「★ 加入常用」添加</span>';
+    return;
+  }
+  el.innerHTML=favCountries.map(f=>{
+    const active=f.code===favSelected?'active':'';
+    return `<div class="fav-tag ${active}" onclick="selectFavorite('${f.code}')" oncontextmenu="event.preventDefault();removeFavorite('${f.code}')">${esc(f.name)} <span class="fav-code">${f.code}</span><span class="fav-rm" onclick="event.stopPropagation();removeFavorite('${f.code}')" title="移除">&times;</span></div>`;
+  }).join('');
+}
+
+// ── 自选模式的搜索下拉 ──
 let countryHlIdx=-1;
 function openCountryDrop(){filterCountry();document.getElementById('countryDrop').classList.add('open');}
 function closeCountryDrop(){setTimeout(()=>document.getElementById('countryDrop').classList.remove('open'),150);}
@@ -459,6 +613,18 @@ document.getElementById('countryInput').addEventListener('keydown',function(e){
   else if(e.key==='Enter'&&countryHlIdx>=0){e.preventDefault();const o=opts[countryHlIdx];pickCountry(o.dataset.code,o.dataset.name);}
   else if(e.key==='Escape'){document.getElementById('countryDrop').classList.remove('open');}
 });
+
+// 初始化常用列表渲染 + 恢复上次模式
+(function _initCountryMode(){
+  renderFavList();
+  const saved=localStorage.getItem('jbreg-country-mode');
+  if(saved==='fav'&&favCountries.length){
+    countryMode='fav';
+    document.querySelector('input[name="countryMode"][value="fav"]').checked=true;
+    document.getElementById('countryCustomPanel').style.display='none';
+    document.getElementById('countryFavPanel').style.display='';
+  }
+})();
 function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
 function copyRow(e,p){navigator.clipboard.writeText(e+' / '+p);}
 
@@ -470,58 +636,99 @@ function parseCardText(){
   const lines=raw.split(/\n/).map(l=>l.trim()).filter(Boolean);
   const fullText=raw;
 
-  // 卡号: 13-19位纯数字（可能带空格）
-  const cardMatch=fullText.match(/\b(\d[\d\s]{12,22}\d)\b/);
-  if(cardMatch){
-    const candidate=cardMatch[1].replace(/\s/g,'');
-    if(candidate.length>=13 && candidate.length<=19) cardNum=candidate;
+  // ── 特殊格式优先：单行包含卡号+CVV+有效期（任意顺序） ──
+  // 格式A: "卡号 CVV MM/YY"  如 "4866990058802965 058 04/29"
+  const fmtA=fullText.match(/\b(\d{13,19})\s+(\d{3,4})\s+(\d{1,2}\/\d{2,4})\b/);
+  if(fmtA){
+    cardNum=fmtA[1]; cvv=fmtA[2];
+    const parts=fmtA[3].split('/');
+    if(parts[1]&&parts[1].length===4) expiry=parts[0].padStart(2,'0')+'/'+parts[1].slice(2);
+    else expiry=parts[0].padStart(2,'0')+'/'+parts[1];
   }
+  // 格式B: "卡号 MM/YY CVV"  如 "4866990058802965 04/29 058"
   if(!cardNum){
-    // 尝试 "Card Number: XXXX" 格式
-    const m2=fullText.match(/(?:卡号|card\s*number)\s*[:：]?\s*(\d[\d\s]{12,22}\d)/i);
-    if(m2) cardNum=m2[1].replace(/\s/g,'');
-  }
-
-  // CVV: 3-4位数字
-  const cvvMatch=fullText.match(/(?:CVV|CVC|安全码)\s*[:：|]?\s*(\d{3,4})\b/i);
-  if(cvvMatch) cvv=cvvMatch[1];
-
-  // 有效期: MM/YY 或 MM/YYYY 或 YYYY/MM
-  const expiryPatterns=[
-    /(?:有效期|expiry|exp|日期)\s*[:：|]?\s*(\d{1,2})\s*[\/\-]\s*(\d{2,4})/i,
-    /\b(\d{4})\s*[\/\-]\s*(\d{1,2})\b/,  // YYYY/MM
-    /\|\s*(\d{2})\s*[\/\-]\s*(\d{2,4})\b/,  // | MM/YY
-  ];
-  for(const pat of expiryPatterns){
-    const m=fullText.match(pat);
-    if(m){
-      let p1=m[1], p2=m[2];
-      // 判断 YYYY/MM vs MM/YY
-      if(p1.length===4 && parseInt(p1)>2000){
-        // YYYY/M -> MM/YY
-        expiry=p2.padStart(2,'0')+'/'+p1.slice(2);
-      } else {
-        // MM/YY or MM/YYYY
-        expiry=p1.padStart(2,'0')+'/'+(p2.length===4?p2.slice(2):p2);
-      }
-      break;
+    const fmtB=fullText.match(/\b(\d{13,19})\s+(\d{1,2}\/\d{2,4})\s+(\d{3,4})\b/);
+    if(fmtB){
+      cardNum=fmtB[1]; cvv=fmtB[3];
+      const parts=fmtB[2].split('/');
+      if(parts[1]&&parts[1].length===4) expiry=parts[0].padStart(2,'0')+'/'+parts[1].slice(2);
+      else expiry=parts[0].padStart(2,'0')+'/'+parts[1];
     }
   }
-  // 兜底：找独立的 MM/YY 模式（不在卡号旁边）
+
+  // ── 卡号: 13-19位纯数字（可能带空格）──
+  if(!cardNum){
+    const cardMatch=fullText.match(/\b(\d[\d\s]{12,22}\d)\b/);
+    if(cardMatch){const c=cardMatch[1].replace(/\s/g,'');if(c.length>=13&&c.length<=19)cardNum=c;}
+  }
+  if(!cardNum){
+    const m2=fullText.match(/(?:卡号|card\s*number)\s*[:：]?\s*(\d[\d\s]{12,22}\d)/i);
+    if(m2)cardNum=m2[1].replace(/\s/g,'');
+  }
+
+  // ── CVV: 3-4位数字 ──
+  if(!cvv){
+    // 带标签的 CVV
+    const cvvMatch=fullText.match(/(?:CVV|CVC|安全码)\s*[:：|]?\s*(\d{3,4})\b/i);
+    if(cvvMatch) cvv=cvvMatch[1];
+  }
+  if(!cvv){
+    // 卡号后紧跟的 3-4 位数字（如 "4866990058802965 058"）
+    if(cardNum){
+      const afterCard=fullText.substring(fullText.indexOf(cardNum)+cardNum.length);
+      const m=afterCard.match(/^\s+(\d{3,4})\b/);
+      if(m) cvv=m[1];
+    }
+  }
+  if(!cvv){
+    // 有效期后紧跟的 3-4 位数字（如 "04/29 058"）
+    if(expiry){
+      const exIdx=fullText.indexOf(expiry);
+      if(exIdx>=0){
+        const afterExpiry=fullText.substring(exIdx+expiry.length);
+        const m=afterExpiry.match(/^\s+(\d{3,4})\b/);
+        if(m) cvv=m[1];
+      }
+    }
+  }
+  if(!cvv){
+    // 兜底：全文中独立的 3-4 位数字（排除卡号和有效期中已匹配的）
+    let clean=fullText;
+    if(cardNum) clean=clean.replace(cardNum,'');
+    if(expiry) clean=clean.replace(expiry,'');
+    const m=clean.match(/\b(\d{3,4})\b/);
+    if(m) cvv=m[1];
+  }
+
+  // ── 有效期: MM/YY 或 MM/YYYY 或 YYYY/MM ──
   if(!expiry){
+    const expiryPatterns=[
+      /(?:有效期|expiry|exp|日期)\s*[:：|]?\s*(\d{1,2})\s*[\/\-]\s*(\d{2,4})/i,
+      /\b(\d{4})\s*[\/\-]\s*(\d{1,2})\b/,
+      /\|\s*(\d{1,2})\s*[\/\-]\s*(\d{2,4})\b/,
+    ];
+    for(const pat of expiryPatterns){
+      const m=fullText.match(pat);
+      if(m){
+        let p1=m[1],p2=m[2];
+        if(p1.length===4&&parseInt(p1)>2000){expiry=p2.padStart(2,'0')+'/'+p1.slice(2);}
+        else{expiry=p1.padStart(2,'0')+'/'+(p2.length===4?p2.slice(2):p2);}
+        break;
+      }
+    }
+  }
+  if(!expiry){
+    // 兜底：任意独立 MM/YY（排除已经作为卡号一部分的）
     const m=fullText.match(/\b(0[1-9]|1[0-2])\s*\/\s*(\d{2})\b/);
     if(m) expiry=m[1]+'/'+m[2];
   }
 
-  // 姓名: "Name: XXX" 或全大写英文名行
+  // ── 姓名 ──
   const nameMatch=fullText.match(/(?:姓名|name|持卡人)\s*[:：]?\s*([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)+)/i);
   if(nameMatch) name=nameMatch[1].toUpperCase();
   if(!name){
-    // 找全大写的行（排除已识别的数据）
     for(const line of lines){
-      if(/^[A-Z][A-Z\s.'-]{3,40}$/.test(line) && !/\d/.test(line) && !/(CVV|CARD|EXPIRY|PHONE|API|ADDRESS|HTTP)/i.test(line)){
-        name=line; break;
-      }
+      if(/^[A-Z][A-Z\s.'-]{3,40}$/.test(line)&&!/\d/.test(line)&&!/(CVV|CARD|EXPIRY|PHONE|API|ADDRESS|HTTP)/i.test(line)){name=line;break;}
     }
   }
 
@@ -556,15 +763,18 @@ function connectWS(){
 function handleMessage(msg){
   if(msg.type==='snapshot'){
     tasks=msg.tasks||{};history=msg.history||[];renderTasks();updateSummary();renderHistory();
-    if(msg.running){document.getElementById('btnStart').style.display='none';document.getElementById('btnStop').style.display='';document.getElementById('btnForceStart').style.display='';}
+    if(msg.running){document.getElementById('btnStart').style.display='none';document.getElementById('btnStop').style.display='';document.getElementById('btnForceStart').style.display='';document.getElementById('btnForceReset').style.display='';}
   }else if(msg.type==='started'){
-    tasks=msg.tasks||{};document.getElementById('btnStart').style.display='none';document.getElementById('btnStop').style.display='';document.getElementById('btnForceStart').style.display='';document.getElementById('btnStart').disabled=false;renderTasks();updateSummary();
+    tasks=msg.tasks||{};document.getElementById('btnStart').style.display='none';document.getElementById('btnStop').style.display='';document.getElementById('btnForceStart').style.display='';document.getElementById('btnForceReset').style.display='';document.getElementById('btnStart').disabled=false;renderTasks();updateSummary();
   }else if(msg.type==='task_update'){
     tasks[msg.task.task_id]=msg.task;renderTasks();updateSummary();
   }else if(msg.type==='completed'||msg.type==='stopped'){
-    document.getElementById('btnStart').style.display='';document.getElementById('btnStart').disabled=false;document.getElementById('btnStop').style.display='none';document.getElementById('btnForceStart').style.display='none';
+    document.getElementById('btnStart').style.display='';document.getElementById('btnStart').disabled=false;document.getElementById('btnStop').style.display='none';document.getElementById('btnForceStart').style.display='none';document.getElementById('btnForceReset').style.display='none';
     if(msg.history){history=msg.history;renderHistory();}updateSummary();
   }else if(msg.type==='history_update'){history=msg.history||[];renderHistory();}
+  else if(msg.type==='login_started'||msg.type==='login_progress'||msg.type==='login_completed'){
+    _updateLoginProgress(msg);
+  }
 }
 
 /* ═══ Render ═══ */
@@ -583,12 +793,66 @@ function renderTasks(){
   }
   area.innerHTML=h+'</div>';
 }
+let cardStatus={};  // email -> 临时状态 'logging_in'|'checking'|'login_failed'|'error' （仅用于进行中操作的覆盖显示）
+
+function _cardBadge(r){
+  // 优先显示临时操作状态（登录中、检测中等）
+  const tmp=cardStatus[r.email];
+  if(tmp==='logging_in') return '<span style="color:var(--accent)">⟳ 登录中...</span>';
+  if(tmp==='checking') return '<span style="color:var(--accent)">⟳ 检测中...</span>';
+  if(tmp==='login_failed') return '<span style="color:var(--error)">✗ 登录失败</span>';
+  if(tmp==='error') return '<span style="color:var(--error)">✗ 检测失败</span>';
+
+  // 读取持久化状态 (history 记录中的 card_status 字段)
+  const st=r.card_status;
+  const detail=r.card_detail||'';
+  const checkTime=r.card_check_time||'';
+  const timeHint=checkTime?` title="检测时间: ${esc(checkTime)}"`:'';
+
+  if(st==='bound'){
+    return `<span style="color:var(--success);font-weight:600;cursor:default"${timeHint}>✓ 已绑${detail?' '+esc(detail):''}</span>`;
+  }
+  if(st==='unbound'){
+    return `<span style="color:var(--warning);cursor:default"${timeHint}>✗ 未绑</span>`;
+  }
+  // 未检测过
+  return '<span style="color:var(--muted)">--</span>';
+}
+
 function renderHistory(){
   const area=document.getElementById('historyArea'),bs=document.getElementById('btnSelectAll'),bd=document.getElementById('btnDeleteSelected');
-  if(!history.length){area.innerHTML='<span style="color:var(--muted);font-size:13px">暂无记录</span>';bs.style.display='none';bd.style.display='none';return;}
-  bs.style.display='';bd.style.display='';
-  let h='<table class="htable"><thead><tr><th style="width:28px"><input type="checkbox" id="histCheckAll" onchange="onCheckAll(this)"></th><th>#</th><th>邮箱</th><th>密码</th><th>时间</th><th></th></tr></thead><tbody>';
-  for(const r of history){h+=`<tr><td><input type="checkbox" class="hist-check" value="${r.id}" onchange="onCheckChange()"></td><td style="color:var(--muted)">${r.id}</td><td class="mono">${esc(r.email)}</td><td class="mono">${esc(r.password)}</td><td style="color:var(--muted);font-size:11px">${esc(r.time||'')}</td><td><button class="cbtn" onclick="copyRow('${esc(r.email)}','${esc(r.password)}')">复制</button> <button class="cbtn cbtn-del" onclick="deleteSingle(${r.id})">删除</button></td></tr>`;}
+  const bc=document.getElementById('btnCopySelected'),ba=document.getElementById('btnCopyAll');
+  const blc=document.getElementById('btnLoginCheck'),bla=document.getElementById('btnLoginAll');
+  const brs=document.getElementById('rangeSelectWrap');
+  if(!history.length){area.innerHTML='<span style="color:var(--muted);font-size:13px">暂无记录</span>';bs.style.display='none';bd.style.display='none';bc.style.display='none';ba.style.display='none';blc.style.display='none';bla.style.display='none';brs.style.display='none';return;}
+  bs.style.display='';bd.style.display='';bc.style.display='';ba.style.display='';blc.style.display='';bla.style.display='';brs.style.display='flex';
+
+  // 统计绑卡 + 国家分布
+  const boundCnt=history.filter(r=>r.card_status==='bound').length;
+  const unboundCnt=history.filter(r=>r.card_status==='unbound').length;
+  const uncheckedCnt=history.length-boundCnt-unboundCnt;
+  // 国家分布统计
+  const countryCounts={};
+  for(const r of history){if(r.country){countryCounts[r.country]=(countryCounts[r.country]||0)+1;}}
+  const countryParts=Object.entries(countryCounts).sort((a,b)=>b[1]-a[1]).map(([c,n])=>`${c}:${n}`).join(' ');
+
+  let statsHtml='';
+  if(boundCnt||unboundCnt) statsHtml+=`<span style="font-size:12px;color:var(--text-secondary);margin-left:10px">已绑 <b style="color:var(--success)">${boundCnt}</b> · 未绑 <b style="color:var(--warning)">${unboundCnt}</b>${uncheckedCnt?' · 未检测 '+uncheckedCnt:''}</span>`;
+  if(countryParts) statsHtml+=`<span style="font-size:11px;color:var(--muted);margin-left:8px">[${countryParts}]</span>`;
+
+  const titleEl=document.querySelector('#historyPanel .panel-title');
+  if(titleEl){
+    const existing=titleEl.querySelector('.card-stats');
+    if(existing) existing.remove();
+    if(statsHtml) titleEl.insertAdjacentHTML('beforeend',`<span class="card-stats">${statsHtml}</span>`);
+  }
+
+  let h='<table class="htable"><thead><tr><th style="width:28px"><input type="checkbox" id="histCheckAll" onchange="onCheckAll(this)"></th><th>#</th><th>邮箱</th><th>密码</th><th>国家</th><th>绑卡</th><th>时间</th><th></th></tr></thead><tbody>';
+  for(const r of history){
+    const badge=_cardBadge(r);
+    const ctry=r.country?`<span title="${esc(r.country_name||r.country)}" style="cursor:default">${esc(r.country)}</span>`:'<span style="color:var(--muted)">--</span>';
+    h+=`<tr><td><input type="checkbox" class="hist-check" value="${r.id}" onchange="onCheckChange()"></td><td style="color:var(--muted)">${r.id}</td><td class="mono">${esc(r.email)}</td><td class="mono">${esc(r.password)}</td><td>${ctry}</td><td>${badge}</td><td style="color:var(--muted);font-size:11px">${esc(r.time||'')}</td><td><button class="cbtn" onclick="copyRow('${esc(r.email)}','${esc(r.password)}')">复制</button> <button class="cbtn cbtn-del" onclick="deleteSingle(${r.id})">删除</button></td></tr>`;
+  }
   area.innerHTML=h+'</tbody></table>';
 }
 function updateSummary(){
@@ -599,14 +863,22 @@ function updateSummary(){
 /* ═══ API ═══ */
 async function startReg(){
   const btn=document.getElementById('btnStart');btn.disabled=true;
-  try{const r=await fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:parseInt(document.getElementById('count').value)||3,password:document.getElementById('password').value,first_name:document.getElementById('firstName').value,last_name:document.getElementById('lastName').value,browser:document.getElementById('browser').value,country:document.getElementById('country').value})});const d=await r.json();if(!d.ok){alert(d.error||'启动失败');btn.disabled=false;}}catch(e){alert('请求失败: '+e.message);btn.disabled=false;}
+  try{const r=await fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:parseInt(document.getElementById('count').value)||3,password:document.getElementById('password').value,first_name:document.getElementById('firstName').value,last_name:document.getElementById('lastName').value,browser:document.getElementById('browser').value,country:document.getElementById('country').value,incognito:document.getElementById('incognito').checked,auto_select_country:document.getElementById('autoSelectCountry').checked,auto_click_add_card:document.getElementById('autoClickAddCard').checked})});const d=await r.json();if(!d.ok){alert(d.error||'启动失败');btn.disabled=false;}}catch(e){alert('请求失败: '+e.message);btn.disabled=false;}
 }
 async function forceStartReg(){
   const btn=document.getElementById('btnForceStart');btn.disabled=true;btn.textContent='创建中...';
-  try{const r=await fetch('/api/force-start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:parseInt(document.getElementById('count').value)||3,password:document.getElementById('password').value,first_name:document.getElementById('firstName').value,last_name:document.getElementById('lastName').value,browser:document.getElementById('browser').value,country:document.getElementById('country').value})});const d=await r.json();if(!d.ok)alert(d.error||'启动失败');}catch(e){alert('请求失败: '+e.message);}
+  try{const r=await fetch('/api/force-start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:parseInt(document.getElementById('count').value)||3,password:document.getElementById('password').value,first_name:document.getElementById('firstName').value,last_name:document.getElementById('lastName').value,browser:document.getElementById('browser').value,country:document.getElementById('country').value,incognito:document.getElementById('incognito').checked,auto_select_country:document.getElementById('autoSelectCountry').checked,auto_click_add_card:document.getElementById('autoClickAddCard').checked})});const d=await r.json();if(!d.ok)alert(d.error||'启动失败');}catch(e){alert('请求失败: '+e.message);}
   btn.disabled=false;btn.textContent='强制新建窗口';
 }
 async function stopReg(){await fetch('/api/stop',{method:'POST'});}
+async function forceReset(){
+  if(!confirm('强制重置运行状态？\n这会停止所有任务并将状态标记为完成。'))return;
+  await fetch('/api/stop',{method:'POST'});
+  // 强制清除前端状态
+  document.getElementById('btnStart').style.display='';document.getElementById('btnStart').disabled=false;
+  document.getElementById('btnStop').style.display='none';document.getElementById('btnForceStart').style.display='none';
+  document.getElementById('btnForceReset').style.display='none';
+}
 async function killAllBrowsers(){
   if(!confirm('确认关闭所有托管的浏览器窗口？'))return;
   const btn=document.getElementById('btnKillAll');btn.disabled=true;btn.textContent='关闭中...';
@@ -651,11 +923,239 @@ async function openBrowsers(){
 
 /* ═══ 历史记录 ═══ */
 function onCheckAll(el){document.querySelectorAll('.hist-check').forEach(c=>c.checked=el.checked);onCheckChange();}
-function onCheckChange(){const n=document.querySelectorAll('.hist-check:checked').length;document.getElementById('btnDeleteSelected').textContent=n?`删除选中 (${n})`:'删除选中';}
+function onCheckChange(){const n=document.querySelectorAll('.hist-check:checked').length;document.getElementById('btnDeleteSelected').textContent=n?`删除选中 (${n})`:'删除选中';document.getElementById('btnCopySelected').textContent=n?`复制选中 (${n})`:'复制选中';document.getElementById('btnLoginCheck').textContent=n?`一键登录+检测 (${n})`:'一键登录+检测';}
 function toggleSelectAll(){const c=document.getElementById('histCheckAll');if(c){c.checked=!c.checked;onCheckAll(c);}}
+function applyRangeSelect(){
+  const raw=document.getElementById('rangeSelectInput').value.trim();
+  if(!raw)return;
+  // 支持格式: 1~10, 1-10, 1~10,15~20, 3,5,7
+  const ranges=raw.split(/[,，]\s*/);
+  const ids=new Set();
+  for(const part of ranges){
+    const m=part.match(/^(\d+)\s*[~\-]\s*(\d+)$/);
+    if(m){
+      const a=Math.min(+m[1],+m[2]),b=Math.max(+m[1],+m[2]);
+      for(let i=a;i<=b;i++) ids.add(i);
+    }else if(/^\d+$/.test(part)){
+      ids.add(+part);
+    }
+  }
+  if(!ids.size)return;
+  document.querySelectorAll('.hist-check').forEach(c=>{
+    const id=parseInt(c.value);
+    if(ids.has(id)) c.checked=true;
+  });
+  onCheckChange();
+  // 更新全选框状态
+  const all=document.querySelectorAll('.hist-check');
+  const checked=document.querySelectorAll('.hist-check:checked');
+  const ha=document.getElementById('histCheckAll');
+  if(ha) ha.checked=checked.length===all.length;
+}
 async function deleteSingle(id){if(!confirm('确认删除这条记录？'))return;await _doDelete([id]);}
 async function deleteSelected(){const cks=document.querySelectorAll('.hist-check:checked');if(!cks.length){alert('请先勾选要删除的记录');return;}const ids=Array.from(cks).map(c=>parseInt(c.value));if(!confirm(`确认删除 ${ids.length} 条记录？`))return;await _doDelete(ids);}
 async function _doDelete(ids){try{const r=await fetch('/api/history/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})});const d=await r.json();if(d.ok){const h=await fetch('/api/history');history=await h.json();renderHistory();}else alert(d.error||'删除失败');}catch(e){alert('删除失败: '+e.message);}}
+
+/* ═══ 批量复制 ═══ */
+function _getSelectedAccounts(){
+  const cks=document.querySelectorAll('.hist-check:checked');
+  const ids=new Set(Array.from(cks).map(c=>parseInt(c.value)));
+  return history.filter(r=>ids.has(r.id));
+}
+function copySelected(){
+  const accs=_getSelectedAccounts();
+  if(!accs.length){alert('请先勾选要复制的记录');return;}
+  const text=accs.map(a=>a.email+' / '+a.password).join('\n');
+  navigator.clipboard.writeText(text);
+  alert(`已复制 ${accs.length} 条账号到剪贴板`);
+}
+function copyAllAccounts(){
+  if(!history.length){alert('暂无记录');return;}
+  const text=history.map(a=>a.email+' / '+a.password).join('\n');
+  navigator.clipboard.writeText(text);
+  alert(`已复制全部 ${history.length} 条账号到剪贴板`);
+}
+
+/* ═══ 导入账号 ═══ */
+function openImportModal(){
+  document.getElementById('importOverlay').classList.add('open');
+  document.getElementById('importResult').style.display='none';
+  // 同步默认密码
+  document.getElementById('importDefaultPwd').value=document.getElementById('password').value||'hajimi123';
+}
+function closeImportModal(){document.getElementById('importOverlay').classList.remove('open');}
+async function doImport(){
+  const text=document.getElementById('importText').value.trim();
+  if(!text){_showImportResult('err','请输入账号信息');return;}
+  const btn=document.getElementById('btnDoImport');
+  btn.disabled=true;btn.textContent='导入中...';
+  try{
+    const r=await fetch('/api/history/import',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        text:text,
+        default_password:document.getElementById('importDefaultPwd').value.trim(),
+        card_status:document.getElementById('importCardStatus').value,
+      })
+    });
+    const d=await r.json();
+    if(d.ok){
+      let msg=`<b>${d.message}</b>`;
+      if(d.errors&&d.errors.length) msg+='<br><span style="color:var(--warning)">解析失败行: '+d.errors.map(e=>esc(e)).join('<br>')+'</span>';
+      _showImportResult('ok',msg);
+      if(d.imported>0){
+        // 清空输入框
+        document.getElementById('importText').value='';
+        // 2秒后自动关闭弹窗
+        setTimeout(closeImportModal,2000);
+      }
+    }else{
+      let msg=d.error||'导入失败';
+      if(d.errors&&d.errors.length) msg+='<br>'+d.errors.map(e=>esc(e)).join('<br>');
+      _showImportResult('err',msg);
+    }
+  }catch(e){
+    _showImportResult('err','请求失败: '+e.message);
+  }
+  btn.disabled=false;btn.textContent='确认导入';
+}
+function _showImportResult(type,msg){
+  const el=document.getElementById('importResult');
+  el.style.display='block';
+  el.style.background=type==='ok'?'var(--success-bg)':'var(--error-bg)';
+  el.style.color=type==='ok'?'var(--success)':'var(--error)';
+  el.style.border='1px solid '+(type==='ok'?'var(--success)':'var(--error)');
+  el.innerHTML=msg;
+}
+
+/* ═══ 一键登录 + 检测绑卡状态 ═══ */
+async function loginAndCheck(allAccounts){
+  let accs;
+  if(allAccounts){
+    accs=history.map(a=>({email:a.email,password:a.password}));
+  }else{
+    accs=_getSelectedAccounts().map(a=>({email:a.email,password:a.password}));
+  }
+  if(!accs.length){alert(allAccounts?'暂无已注册账号':'请先勾选要登录的账号');return;}
+  if(accs.length>20){alert('单次最多登录 20 个账号');return;}
+
+  const btnLC=document.getElementById('btnLoginCheck');
+  const btnLA=document.getElementById('btnLoginAll');
+  btnLC.disabled=true;btnLA.disabled=true;
+  btnLC.textContent='登录中...';btnLA.textContent='登录中...';
+
+  // 标记所有账号为 logging_in
+  for(const a of accs){cardStatus[a.email]='logging_in';}
+  renderHistory();
+
+  // 显示进度面板
+  const progressPanel=document.getElementById('loginProgressPanel');
+  progressPanel.style.display='block';
+  document.getElementById('loginProgressText').textContent=`0/${accs.length} 准备中...`;
+  document.getElementById('loginProgressBar').style.width='0%';
+  document.getElementById('loginProgressList').innerHTML=accs.map(a=>`<div id="lp_${a.email.replace(/[@.]/g,'_')}" style="color:var(--muted)">⏳ ${esc(a.email)} — 等待中</div>`).join('');
+
+  try{
+    const r=await fetch('/api/login-and-check',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        accounts:accs,
+        browser:document.getElementById('browser').value||'chrome',
+        goto_card_page:true,
+        country:document.getElementById('country').value||'JP',
+        incognito:document.getElementById('incognito').checked,
+      })
+    });
+    const d=await r.json();
+    if(!d.ok){
+      alert(d.error||'启动失败');
+      for(const a of accs){cardStatus[a.email]='error';}
+      renderHistory();
+      btnLC.disabled=false;btnLA.disabled=false;
+      btnLC.textContent='一键登录+检测';btnLA.textContent='全部登录+检测';
+    }
+    // 实际进度通过 WebSocket 推送
+  }catch(e){
+    alert('请求失败: '+e.message);
+    for(const a of accs){cardStatus[a.email]='error';}
+    renderHistory();
+    btnLC.disabled=false;btnLA.disabled=false;
+    btnLC.textContent='一键登录+检测';btnLA.textContent='全部登录+检测';
+  }
+  // 按钮状态会在 WebSocket login_completed 消息中恢复
+}
+
+function _updateLoginProgress(msg){
+  if(msg.type==='login_started'){
+    const panel=document.getElementById('loginProgressPanel');
+    panel.style.display='block';
+    document.getElementById('loginProgressText').textContent=`0/${msg.total} 开始登录...`;
+    document.getElementById('loginProgressBar').style.width='0%';
+  }
+  else if(msg.type==='login_progress'){
+    const pct=msg.total>0?Math.round(msg.done/msg.total*100):0;
+    document.getElementById('loginProgressText').textContent=`${msg.done}/${msg.total} 登录中...`;
+    document.getElementById('loginProgressBar').style.width=pct+'%';
+
+    // 更新单条进度显示
+    const res=msg.result;
+    if(res){
+      const key=res.email.replace(/[@.]/g,'_');
+      const el=document.getElementById('lp_'+key);
+      if(el){
+        if(res.login_ok){
+          if(res.has_card){
+            el.style.color='var(--success)';
+            el.innerHTML=`✓ ${esc(res.email)} — 已登录 | <b>已绑卡</b> ${esc(res.card_detail||'')}`;
+          }else{
+            el.style.color='var(--warning)';
+            el.innerHTML=`✓ ${esc(res.email)} — 已登录 | <b>未绑卡</b>（已跳转到绑卡页）`;
+          }
+        }else{
+          el.style.color='var(--error)';
+          el.innerHTML=`✗ ${esc(res.email)} — ${esc(res.error||'登录失败')}`;
+        }
+      }
+
+      // 清除临时状态（持久化状态已通过 history_update 推送）
+      delete cardStatus[res.email];
+      if(!res.login_ok) cardStatus[res.email]='login_failed';
+      renderHistory();
+    }
+  }
+  else if(msg.type==='login_completed'){
+    document.getElementById('loginProgressText').textContent='全部完成';
+    document.getElementById('loginProgressBar').style.width='100%';
+
+    // 清除所有临时状态
+    if(msg.progress){
+      for(const res of msg.progress){
+        delete cardStatus[res.email];
+        if(!res.login_ok && res.error) cardStatus[res.email]='login_failed';
+      }
+      renderHistory();
+    }
+
+    // 恢复按钮
+    const btnLC=document.getElementById('btnLoginCheck');
+    const btnLA=document.getElementById('btnLoginAll');
+    btnLC.disabled=false;btnLA.disabled=false;
+    btnLC.textContent='一键登录+检测';btnLA.textContent='全部登录+检测';
+
+    // 刷新浏览器列表（新开的浏览器可以用于填卡）
+    setTimeout(refreshBrowsers,2000);
+
+    // 统计结果
+    const total=msg.progress?msg.progress.length:0;
+    const loginOk=msg.progress?msg.progress.filter(r=>r.login_ok).length:0;
+    const hasCard=msg.progress?msg.progress.filter(r=>r.has_card).length:0;
+    const noCard=loginOk-hasCard;
+    document.getElementById('loginProgressText').textContent=
+      `全部完成 — 登录成功 ${loginOk}/${total}，已绑卡 ${hasCard}，未绑卡 ${noCard}`;
+  }
+}
 
 /* ═══ 输入格式化 ═══ */
 document.getElementById('cardExpiry').addEventListener('input',function(){let v=this.value.replace(/[^\d]/g,'');if(v.length>=2)v=v.substring(0,2)+'/'+v.substring(2,4);this.value=v;});
@@ -663,9 +1163,11 @@ document.getElementById('cardNumber').addEventListener('input',function(){this.v
 
 /* ═══ 表单数据持久化 ═══ */
 const PERSIST_FIELDS=['password','browser','count','country','countryInput','cardNumber','cardExpiry','cardCvv','cardName','openBrowserCount','openBrowserType'];
+const PERSIST_CHECKS=['incognito','autoSelectCountry','autoClickAddCard'];
 function saveFormData(){
   const data={};
   for(const id of PERSIST_FIELDS){const el=document.getElementById(id);if(el)data[id]=el.value;}
+  for(const id of PERSIST_CHECKS){const el=document.getElementById(id);if(el)data[id]=el.checked;}
   localStorage.setItem('jbreg-form',JSON.stringify(data));
 }
 function restoreFormData(){
@@ -673,7 +1175,10 @@ function restoreFormData(){
     const data=JSON.parse(localStorage.getItem('jbreg-form')||'{}');
     for(const [id,val] of Object.entries(data)){
       const el=document.getElementById(id);
-      if(el && val) el.value=val;
+      if(el && val!==undefined){
+        if(el.type==='checkbox') el.checked=!!val;
+        else el.value=val;
+      }
     }
   }catch(e){}
 }
@@ -683,10 +1188,48 @@ PERSIST_FIELDS.forEach(id=>{
   if(el) el.addEventListener('change',saveFormData);
   if(el && (el.tagName==='INPUT'||el.tagName==='TEXTAREA')) el.addEventListener('input',saveFormData);
 });
+PERSIST_CHECKS.forEach(id=>{
+  const el=document.getElementById(id);
+  if(el) el.addEventListener('change',saveFormData);
+});
+
+/* ═══ API Key 管理 ═══ */
+async function loadApiKeyStatus(){
+  try{
+    const r=await fetch('/api/settings');
+    const d=await r.json();
+    const el=document.getElementById('apiKeyStatus');
+    if(d.api_key_set){
+      el.textContent='✓ 已配置 ('+d.api_key_masked+')';
+      el.style.color='var(--success)';
+      document.getElementById('apiKeyInput').placeholder='已配置，重新输入可覆盖';
+    }else{
+      el.textContent='✗ 未配置';
+      el.style.color='var(--error)';
+    }
+  }catch(e){
+    document.getElementById('apiKeyStatus').textContent='加载失败';
+  }
+}
+async function saveApiKey(){
+  const key=document.getElementById('apiKeyInput').value.trim();
+  if(!key){alert('请输入 API Key');return;}
+  try{
+    const r=await fetch('/api/settings/api-key',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({api_key:key})});
+    const d=await r.json();
+    if(d.ok){
+      document.getElementById('apiKeyInput').value='';
+      loadApiKeyStatus();
+    }else{
+      alert(d.error||'保存失败');
+    }
+  }catch(e){alert('请求失败: '+e.message);}
+}
 
 /* ═══ 初始化 ═══ */
 restoreFormData();
 randomName(); randomCardName(); connectWS();
+loadApiKeyStatus();
 </script>
 </body>
 </html>

@@ -243,6 +243,28 @@ def _close_browser_and_cleanup(browser, data_dir: Path | None = None):
     _cleanup_data_dir(data_dir)
 
 
+def _kill_browser_on_port(port: int):
+    """强杀监听指定 debug 端口的浏览器进程，防止僵尸进程"""
+    import subprocess
+    try:
+        ps_script = (
+            f'Get-WmiObject Win32_Process -Filter "name=\'chrome.exe\' or name=\'msedge.exe\'" '
+            f'| Where-Object {{ $_.CommandLine -match \'--remote-debugging-port={port}\' }} '
+            f'| Select-Object -ExpandProperty ProcessId'
+        )
+        raw = subprocess.check_output(
+            ["powershell", "-NoProfile", "-Command", ps_script],
+            timeout=8, stderr=subprocess.DEVNULL
+        ).decode("utf-8", errors="ignore")
+        for line in raw.strip().splitlines():
+            pid = line.strip()
+            if pid.isdigit():
+                subprocess.run(["taskkill", "/F", "/PID", pid], timeout=5, capture_output=True)
+                logger.info(f"[Browser] 强杀端口 {port} 的残留进程 PID={pid}")
+    except Exception as e:
+        logger.debug(f"[Browser] 清理端口 {port} 进程失败: {e}")
+
+
 def _safe_browser_check(browser) -> bool:
     """安全检测浏览器是否仍然存活（不会导致浏览器被杀）"""
     if not browser:
@@ -341,7 +363,7 @@ def _find_browser_path(browser_type: str) -> str | None:
     return None
 
 
-def _create_browser(browser_type: str = "chrome", fp_seed: int | None = None, max_retries: int = 3) -> tuple:
+def _create_browser(browser_type: str = "chrome", fp_seed: int | None = None, max_retries: int = 3, incognito: bool = True) -> tuple:
     """
     创建浏览器实例（带重试，防止指纹浏览器启动慢导致连接超时）。
     返回 (Chromium实例, fp_info字典或None, data_dir路径)
@@ -394,7 +416,8 @@ def _create_browser(browser_type: str = "chrome", fp_seed: int | None = None, ma
                     if attempt == 1:
                         logger.warning(f"[Browser] 未找到 {browser_type}，使用默认 Chrome")
 
-        co.incognito()
+        if incognito:
+            co.incognito()
         co.set_argument("--disable-popup-blocking")
 
         try:
@@ -404,25 +427,23 @@ def _create_browser(browser_type: str = "chrome", fp_seed: int | None = None, ma
         except Exception as e:
             logger.warning(f"[Browser] 端口 {port} 启动失败 (attempt {attempt}/{max_retries}): {e}")
             if attempt < max_retries:
-                # 浏览器进程可能已在后台启动但连接超时，等待后重试连接
-                wait_sec = 5 * attempt  # 5s, 10s
+                wait_sec = 5 * attempt
                 logger.info(f"[Browser] 等待 {wait_sec}s 后重试...")
                 time.sleep(wait_sec)
 
-                # 重试时尝试直接连接已启动的浏览器（不再启动新进程）
+                # 重试：直接连接已启动的浏览器（进程可能已在后台就绪）
                 try:
                     browser = Chromium(f"127.0.0.1:{port}")
                     logger.info(f"[Browser] 端口 {port} 重连成功")
                     return browser, fp_info, data_dir
                 except Exception:
-                    logger.debug(f"[Browser] 端口 {port} 重连也失败，继续重试")
-                    # 清理可能残留的进程和数据
-                    _cleanup_data_dir(data_dir)
-                    data_dir = None
-                    # 分配新端口重试
-                    port = _alloc_port()
+                    logger.debug(f"[Browser] 端口 {port} 重连也失败")
+                    # 强杀残留进程（防止后台僵尸进程打开空白窗口）
+                    _kill_browser_on_port(port)
+                    # 不换端口，不删数据目录，用同一个端口重试
             else:
-                raise  # 最后一次重试仍然失败，抛出异常
+                _kill_browser_on_port(port)
+                raise
 
 
 # ═══════════════════════════════════════════════════════════
@@ -636,45 +657,83 @@ def _click_recaptcha_checkbox(tab) -> bool:
     _inject_cookie_killer(tab)
     _dismiss_cookie_banner(tab)
 
-    anchor_frame = None
-    for attempt in range(1, 7):
-        logger.info(f"[Step 4] 查找 reCAPTCHA iframe（第 {attempt}/6 次）...")
-        try:
-            anchor_frame = tab.get_frame("@title=reCAPTCHA", timeout=10)
-        except Exception:
-            pass
+    # 最多尝试 2 轮（第 1 轮正常查找，第 2 轮关闭 dialog 重新触发）
+    for big_round in range(2):
+        anchor_frame = None
+        search_attempts = 4 if big_round == 0 else 3
 
-        if not anchor_frame:
+        for attempt in range(1, search_attempts + 1):
+            logger.info(f"[Step 4] 查找 reCAPTCHA iframe（轮次 {big_round+1}，第 {attempt}/{search_attempts} 次）...")
             try:
-                iframes = tab.eles("tag:iframe")
-                for ifr in iframes:
-                    src = (ifr.attr("src") or "").lower()
-                    title = (ifr.attr("title") or "").lower()
-                    if ("recaptcha" in src and "anchor" in src) or title == "recaptcha":
-                        try:
-                            anchor_frame = tab.get_frame(ifr)
-                            break
-                        except Exception:
-                            pass
+                anchor_frame = tab.get_frame("@title=reCAPTCHA", timeout=8)
             except Exception:
                 pass
 
+            if not anchor_frame:
+                try:
+                    iframes = tab.eles("tag:iframe")
+                    for ifr in iframes:
+                        src = (ifr.attr("src") or "").lower()
+                        title = (ifr.attr("title") or "").lower()
+                        if ("recaptcha" in src and "anchor" in src) or title == "recaptcha":
+                            try:
+                                anchor_frame = tab.get_frame(ifr)
+                                break
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
+            if anchor_frame:
+                _mark_recaptcha_seen()
+                break
+
+            if _captcha_is_done(tab):
+                logger.info("[Step 4] 等待中检测到页面已跳过 reCAPTCHA")
+                return True
+
+            # 检查 dialog 是否打开但内部为空（reCAPTCHA 加载失败）
+            try:
+                dialog_empty = tab.run_js("""
+                    const d = document.querySelector('dialog[open]');
+                    if (!d) return false;
+                    const inner = d.innerHTML;
+                    return !inner.includes('recaptcha') && !inner.includes('iframe');
+                """)
+                if dialog_empty and attempt >= 2:
+                    logger.warning(f"[Step 4] dialog 已打开但 reCAPTCHA 未加载（空 dialog），将关闭重试")
+                    break  # 跳出内循环，进入 big_round 重试
+            except Exception:
+                pass
+
+            logger.warning(f"[Step 4] 第 {attempt} 次未找到 iframe，等待...")
+            time.sleep(2.5)
+
         if anchor_frame:
-            _mark_recaptcha_seen()
-            break
+            break  # 找到了，跳出大循环
 
-        if _captcha_is_done(tab):
-            logger.info("[Step 4] 等待中检测到页面已跳过 reCAPTCHA")
-            return True
-
-        logger.warning(f"[Step 4] 第 {attempt} 次未找到 iframe，等待...")
-        time.sleep(2.5)
+        # 没找到 iframe，尝试关闭 dialog 并重新点击 Continue 触发 reCAPTCHA 重新加载
+        if big_round == 0:
+            logger.info("[Step 4] reCAPTCHA 未加载，关闭 dialog 重新触发...")
+            try:
+                # 关闭 dialog
+                tab.run_js("""
+                    const d = document.querySelector('dialog[open]');
+                    if (d) { d.close(); d.remove(); }
+                """)
+                time.sleep(1)
+                # 重新点击 Continue
+                tab.run_js("""
+                    const btn = document.querySelector('button[type="submit"]');
+                    if (btn) btn.click();
+                """)
+                time.sleep(3)
+            except Exception as e:
+                logger.warning(f"[Step 4] 重新触发失败: {e}")
 
     if not anchor_frame:
-        # reCAPTCHA 从未出现 — 可能 Continue 没触发，或网络问题
-        # 不报错，回到主流程让 Step 5b 再尝试提交
         logger.warning("[Step 4] 未找到 reCAPTCHA iframe，可能 Continue 未生效，将尝试重新提交")
-        return True  # 返回 True 让流程继续，Step 5b 会处理
+        return True  # 返回 True 让流程继续
 
     checkbox = None
     for cb_try in range(1, 4):
@@ -715,13 +774,72 @@ def _wait_for_manual_captcha(tab, cancel_flag: Callable[[], bool] | None = None)
     """
     等待用户手动完成 reCAPTCHA 图片验证，无时限。
     cancel_flag: 可选的取消检查函数，返回 True 时退出等待。
+    如果检测到 dialog 打开但 reCAPTCHA 未加载（空 dialog），自动尝试刷新。
     """
     if _captcha_is_done(tab):
         logger.info("[Step 5] reCAPTCHA 已通过（无需手动操作）")
         return True
 
+    # 先检查 reCAPTCHA 是否真的存在（dialog 打开但内容为空 = 加载失败）
+    try:
+        has_recaptcha = tab.run_js("""
+            const iframes = document.querySelectorAll('iframe');
+            for (const f of iframes) {
+                if ((f.src || '').includes('recaptcha') || (f.title || '').toLowerCase().includes('recaptcha'))
+                    return true;
+            }
+            return false;
+        """)
+        if not has_recaptcha:
+            logger.warning("[Step 5] 未检测到 reCAPTCHA iframe，尝试关闭 dialog 重新触发...")
+            # 尝试修复：关闭空 dialog，重新点击 Continue
+            for fix_try in range(3):
+                try:
+                    tab.run_js("""
+                        const d = document.querySelector('dialog[open]');
+                        if (d) { d.close(); d.remove(); }
+                    """)
+                    time.sleep(1)
+                    tab.run_js("document.querySelector('button[type=\"submit\"]')?.click()")
+                    time.sleep(4)
+                    # 检查 reCAPTCHA 是否加载了
+                    loaded = tab.run_js("""
+                        const iframes = document.querySelectorAll('iframe');
+                        for (const f of iframes) {
+                            if ((f.src || '').includes('recaptcha')) return true;
+                        }
+                        return false;
+                    """)
+                    if loaded:
+                        logger.info(f"[Step 5] 第 {fix_try+1} 次重试后 reCAPTCHA 加载成功")
+                        # 自动点击 "I'm not a robot"
+                        try:
+                            anchor_frame = tab.get_frame("@title=reCAPTCHA", timeout=5)
+                            if anchor_frame:
+                                cb = anchor_frame.ele("#recaptcha-anchor", timeout=5) or anchor_frame.ele(".recaptcha-checkbox", timeout=3)
+                                if cb:
+                                    cb.click()
+                                    logger.info("[Step 5] 已自动点击 'I'm not a robot'")
+                                    time.sleep(2)
+                        except Exception:
+                            pass
+                        break
+                    if _has_left_email_page(tab):
+                        logger.info("[Step 5] 页面已跳转，无需验证码")
+                        return True
+                except Exception as e:
+                    logger.debug(f"[Step 5] 修复尝试 {fix_try+1} 失败: {e}")
+                    time.sleep(2)
+    except Exception:
+        pass
+
+    if _captcha_is_done(tab):
+        logger.info("[Step 5] reCAPTCHA 已通过")
+        return True
+
     logger.info("[Step 5] 请在浏览器中手动完成验证码（无时限，慢慢来）...")
     poll_count = 0
+    reload_attempted = False
 
     while True:
         poll_count += 1
@@ -731,6 +849,24 @@ def _wait_for_manual_captcha(tab, cancel_flag: Callable[[], bool] | None = None)
         if _captcha_is_done(tab):
             logger.info(f"[Step 5] 验证码已通过（轮询 {poll_count} 次）")
             return True
+        if _has_left_email_page(tab):
+            logger.info("[Step 5] 页面已跳转（可能不需要验证码）")
+            return True
+
+        # 每 30 次轮询（约 60 秒）检查一次：如果 dialog 仍然是空的，重新加载页面
+        if poll_count % 30 == 0 and not reload_attempted:
+            try:
+                has_rc = tab.run_js("""
+                    return document.querySelectorAll('iframe[src*="recaptcha"]').length > 0
+                """)
+                if not has_rc:
+                    logger.warning("[Step 5] 等待 60s 后 reCAPTCHA 仍未加载，刷新页面重试...")
+                    tab.run_js("location.reload()")
+                    time.sleep(5)
+                    reload_attempted = True
+            except Exception:
+                pass
+
         time.sleep(config.DELAY_CAPTCHA_POLL)
 
 
@@ -991,8 +1127,13 @@ def _extract_jb_link_or_code(html: str):
     return None
 
 
-def _fill_verification_code(tab, email: str) -> bool:
-    logger.info("[Step 6] 等待页面加载...")
+def _fill_verification_code(tab, email: str, task_id: int = 0, email_start_ts: int = 0) -> bool:
+    """
+    轮询邮箱获取验证码并填入。
+    email_start_ts: 邮箱提交到 JetBrains 的时间戳（毫秒），用于过滤旧邮件。
+    """
+    tag = f"[Task {task_id} Step 6]"
+    logger.info(f"{tag} 等待页面加载...")
 
     try:
         tab.wait.doc_loaded(timeout=15)
@@ -1000,46 +1141,55 @@ def _fill_verification_code(tab, email: str) -> bool:
         pass
     time.sleep(1.5)
 
-    # 每次导航后重新注入 Cookie killer
     _inject_cookie_killer(tab)
 
     try:
-        logger.info(f"[Step 6] 当前 URL: {tab.url}")
+        logger.info(f"{tag} 当前 URL: {tab.url}")
     except Exception:
         pass
 
-    # 轮询邮件，同时支持链接和验证码
-    logger.info(f"[Step 6] 开始轮询邮箱: {email}")
+    # 使用传入的 email_start_ts 过滤旧邮件（在填写邮箱之前记录的时间戳）
+    # 如果没传入，用当前时间减 60 秒作为安全值
+    if email_start_ts <= 0:
+        email_start_ts = int(time.time() * 1000) - 60000
+
+    logger.info(f"{tag} 开始轮询邮箱: {email} (过滤 {email_start_ts} 之前的邮件)")
     deadline = time.time() + config.EMAIL_POLL_TIMEOUT
     attempt = 0
     mail_result = None
-    seen_mail_ids = set()  # 避免重复处理已检查过的邮件
+    seen_mail_ids = set()
 
     while time.time() < deadline:
         attempt += 1
         try:
             mails = email_service.get_mails(email)
         except Exception as e:
-            logger.warning(f"[Step 6] 第{attempt}次轮询网络错误: {e}")
+            logger.warning(f"{tag} 第{attempt}次轮询网络错误: {e}")
             time.sleep(config.EMAIL_POLL_INTERVAL)
             continue
 
         if mails:
             for mail in mails:
-                # 跳过已处理的邮件
                 mail_id = mail.get("id", "")
                 if mail_id and mail_id in seen_mail_ids:
                     continue
                 if mail_id:
                     seen_mail_ids.add(mail_id)
 
-                # 获取邮件内容（content 字段，由 get_mails 补充）
+                # 时间戳过滤：nimail 的 mail_id 是毫秒时间戳
+                # 只接受在邮箱提交给 JetBrains 之后到达的邮件
+                try:
+                    mid_int = int(mail_id)
+                    if mid_int < email_start_ts - 5000:  # 5 秒容差
+                        continue  # 静默跳过旧邮件，不打日志（减少噪音）
+                except (ValueError, TypeError):
+                    pass
+
                 content = mail.get("content", "") or mail.get("html", "") or mail.get("text", "")
                 subject = mail.get("subject", "") or ""
 
-                # 必须有实际内容才处理（避免 content 为空时误匹配 subject 中的数字）
                 if not content or len(content.strip()) < 20:
-                    logger.warning(f"[Step 6] 邮件 {mail_id} 内容为空或过短，跳过")
+                    logger.warning(f"{tag} 邮件 {mail_id} 内容为空或过短，跳过")
                     continue
 
                 # 检查是否是 JetBrains 相关邮件
@@ -1047,52 +1197,54 @@ def _fill_verification_code(tab, email: str) -> bool:
                 if "jetbrains" not in full_text_lower and "account" not in full_text_lower:
                     continue
 
-                # 提取验证码/链接时只从 content 中提取（不从 subject 提取，避免误匹配）
+                # 验证邮件收件人确实是当前 email（防止 API 返回错误邮箱的邮件）
+                mail_to = mail.get("to", "") or ""
+                if mail_to and email.lower() not in mail_to.lower():
+                    logger.warning(f"{tag} 邮件 {mail_id} 收件人 {mail_to} 与当前邮箱 {email} 不匹配，跳过")
+                    continue
+
+                # 提取验证码/链接时只从 content 中提取
                 res = _extract_jb_link_or_code(content)
                 if res:
                     mail_result = res
-                    logger.info(f"[Step 6] 从邮件 {mail_id} (subject: {subject[:40]}) 提取到结果")
+                    logger.info(f"{tag} 从邮件 {mail_id} (subject: {subject[:40]}) 提取到结果")
                     break
 
         if mail_result:
             break
 
         if attempt % 5 == 0:
-            logger.info(f"[Step 6] 第{attempt}次轮询，尚未收到验证邮件... (已检查 {len(seen_mail_ids)} 封)")
+            logger.info(f"{tag} 第{attempt}次轮询，尚未收到验证邮件... (已检查 {len(seen_mail_ids)} 封邮件)")
 
         time.sleep(config.EMAIL_POLL_INTERVAL)
 
     if not mail_result:
-        logger.error(f"[Step 6] 邮件轮询超时（{config.EMAIL_POLL_TIMEOUT}s），未收到验证")
+        logger.error(f"{tag} 邮件轮询超时（{config.EMAIL_POLL_TIMEOUT}s），未收到验证")
         return False
 
     kind, payload = mail_result
-    logger.info(f"[Step 6] 收到 {kind}: {str(payload)[:60]}")
+    logger.info(f"{tag} 收到 {kind}: {str(payload)[:60]}")
 
     if kind == "LINK":
-        # 验证链接模式：直接导航
-        logger.info("[Step 6] 打开验证链接...")
+        logger.info(f"{tag} 打开验证链接...")
         try:
             tab.get(payload)
             tab.wait.doc_loaded(timeout=30)
             time.sleep(3)
         except Exception as e:
-            logger.warning(f"[Step 6] 打开链接失败: {e}")
+            logger.warning(f"{tag} 打开链接失败: {e}")
         return True
 
     # OTP 码模式
     code = str(payload).strip()
-    logger.info(f"[Step 6] 获取到验证码: {code}")
+    logger.info(f"{tag} 获取到验证码: {code}")
     time.sleep(1)
 
-    # 强制 DOM 重排，解决 React SPA 渲染延迟导致元素不可见的问题
-    # （打开 F12 能触发填入就是因为 DevTools 强制了重排）
     _force_dom_reflow(tab)
 
-    # 等 OTP 输入框出现（多种选择器，JetBrains 用 name="otp-1" ~ "otp-6"）
+    # 等 OTP 输入框出现
     otp_found = False
     for wait_round in range(15):
-        # 方式1：JetBrains 专用 otp-N 输入框
         try:
             first_otp = tab.ele("@name=otp-1", timeout=2)
             if first_otp:
@@ -1100,7 +1252,6 @@ def _fill_verification_code(tab, email: str) -> bool:
                 break
         except Exception:
             pass
-        # 方式2：maxlength=1 的单字符输入框
         try:
             code_inputs = tab.eles("input[maxlength='1']", timeout=2)
             if code_inputs and len(code_inputs) >= 4:
@@ -1108,36 +1259,38 @@ def _fill_verification_code(tab, email: str) -> bool:
                 break
         except Exception:
             pass
-        # 每隔几轮强制重排一次
         if wait_round % 3 == 2:
             _force_dom_reflow(tab)
         time.sleep(1)
 
     if not otp_found:
-        logger.warning("[Step 6] OTP 输入框未出现，尝试强制重排后再找...")
+        logger.warning(f"{tag} OTP 输入框未出现，尝试强制重排后再找...")
         _force_dom_reflow(tab)
         time.sleep(1)
 
-    # ── 填入方式1：JetBrains otp-1 ~ otp-6（CDP 键盘逐字符输入，最可靠）──
     filled_ok = _fill_otp_by_name(tab, code)
-
-    # ── 填入方式2：maxlength=1 输入框组 ──
     if not filled_ok:
         filled_ok = _fill_otp_by_maxlength(tab, code)
-
-    # ── 填入方式3：单输入框 ──
     if not filled_ok:
         filled_ok = _fill_otp_single_input(tab, code)
-
-    # ── 填入方式4：兜底 — 找所有可见 input ──
     if not filled_ok:
         filled_ok = _fill_otp_fallback(tab, code)
 
     if not filled_ok:
-        logger.error("[Step 6] 未找到验证码输入框")
+        logger.error(f"{tag} 未找到验证码输入框")
         return False
 
+    # 填入后验证：检查页面是否接受了验证码（等几秒看是否出现错误提示）
     time.sleep(2)
+    try:
+        page_text = tab.run_js("return document.body.innerText") or ""
+        if "invalid" in page_text.lower() or "incorrect" in page_text.lower() or "expired" in page_text.lower():
+            logger.warning(f"{tag} 验证码可能错误（页面提示 invalid/incorrect/expired），code={code}")
+        elif "error" in page_text.lower() and "otp" in page_text.lower():
+            logger.warning(f"{tag} 验证码填入后页面有 OTP 错误提示")
+    except Exception:
+        pass
+
     return True
 
 
@@ -1518,183 +1671,281 @@ def _get_country_name(code: str) -> str:
     return _COUNTRY_NAMES.get(code.upper(), code)
 
 
-def _setup_tokens_page(tab, country_code: str = "JP") -> bool:
-    """注册成功后：导航到 tokens 页 → 选国家 → 点 Add credit card"""
-    logger.info(f"[Step 8] 跳转到 tokens 页（国家={country_code}）...")
+def _setup_tokens_page(tab, country_code: str = "JP",
+                       do_select_country: bool = True,
+                       do_click_add_card: bool = True) -> bool:
+    """注册成功后：导航到 tokens 页 → 选国家 → 点 Add credit card
+    
+    Args:
+        do_select_country: False 时跳过选国家，只导航到 tokens 页
+        do_click_add_card: False 时跳过点 Add credit card
+    """
+    logger.info(f"[Step 8] 跳转到 tokens 页（国家={country_code}，自动选国家={do_select_country}，自动点绑卡={do_click_add_card}）...")
 
     try:
         tab.get(TOKENS_URL)
         tab.wait.doc_loaded(timeout=30)
     except Exception as e:
         logger.warning(f"[Step 8] 导航失败: {e}")
-    time.sleep(3)
+    time.sleep(2)
 
     _inject_cookie_killer(tab)
     _dismiss_cookie_banner(tab)
 
-    # 等待页面 SPA 内容真正渲染完成（tokens 页是 SPA 异步加载）
+    if not do_select_country and not do_click_add_card:
+        logger.info("[Step 8] 自动选国家和自动点绑卡均已关闭，仅导航到 tokens 页")
+        return True
+
+    # 等待 SPA 渲染出可操作元素
     _wait_tokens_page_ready(tab)
 
-    # 第一步：点击 "Select country" 链接
-    try:
-        select_link = (
-            tab.ele("text:Select country", timeout=5)
-            or tab.ele("text:Select", timeout=3)
-        )
-        if select_link:
-            select_link.click()
-            logger.info("[Step 8] 已点击 Select country")
-            time.sleep(2)
-    except Exception as e:
-        logger.info(f"[Step 8] 未找到 Select country（可能已设置）: {e}")
+    # 判断当前页面状态
+    page_state = _detect_tokens_state(tab)
+    logger.info(f"[Step 8] 页面状态: {page_state}")
 
-    # 第二步：选国家（带重试 — 弹窗/select 可能需要时间渲染）
-    # 从 select 元素动态获取国家名（无需本地维护完整映射）
-    selected = 'no_select'
+    if page_state == 'has_add_card':
+        # 已有国家且直接显示 Add credit card
+        if do_click_add_card:
+            return _click_add_credit_card(tab)
+        logger.info("[Step 8] Add credit card 可用，但自动点绑卡已关闭")
+        return True
+
+    if do_select_country:
+        # 需要选国家
+        if page_state == 'has_country_modal':
+            pass  # 弹窗已打开，直接选
+        else:
+            _click_select_country(tab)
+            time.sleep(1)
+
+        _select_country_in_modal(tab, country_code)
+        _click_save_button(tab)
+        time.sleep(2)
+    else:
+        logger.info("[Step 8] 自动选国家已关闭，跳过")
+
+    # 点 Add credit card
+    if do_click_add_card:
+        return _click_add_credit_card(tab)
+    else:
+        logger.info("[Step 8] 自动点绑卡已关闭，跳过")
+        return True
+
+
+def _detect_tokens_state(tab) -> str:
+    """检测 tokens 页面当前状态"""
+    try:
+        state = tab.run_js("""
+            const txt = document.body.textContent || '';
+            const html = document.body.innerHTML || '';
+            // 已有 "Add credit card" 可点击
+            const addBtn = document.querySelector('a[href*="credit"], button');
+            let hasAddCard = false;
+            if (addBtn) {
+                document.querySelectorAll('a, button').forEach(el => {
+                    if ((el.textContent||'').trim() === 'Add credit card' && el.offsetParent !== null)
+                        hasAddCard = true;
+                });
+            }
+            if (hasAddCard) return 'has_add_card';
+            // 弹窗中有 select[name=country]（modal 已打开）
+            const modal = document.querySelector('.modal.in, .modal[style*="display: block"]');
+            if (modal && modal.querySelector('select[name="country"]')) return 'has_country_modal';
+            // 有 "Select country" 链接
+            if (txt.includes('Select country')) return 'need_select_country';
+            // 有 Change 链接（国家已设但想改）
+            if (html.includes('Change') && html.includes('country')) return 'has_country_set';
+            return 'unknown';
+        """)
+        return state or 'unknown'
+    except Exception:
+        return 'unknown'
+
+
+def _click_select_country(tab):
+    """点击 Select country / Change 链接打开国家弹窗"""
+    try:
+        # 优先用 JS 精准点击（比 DrissionPage ele 查找快得多）
+        clicked = tab.run_js("""
+            // 优先找 "Select country"
+            const links = document.querySelectorAll('a, button, span');
+            for (const el of links) {
+                const t = (el.textContent||'').trim();
+                if (t === 'Select country' || t === 'Select') {
+                    el.click(); return 'select';
+                }
+            }
+            // 备选：找 country 旁边的 Change
+            const labels = document.querySelectorAll('label, .control-label');
+            for (const lbl of labels) {
+                if ((lbl.textContent||'').includes('Country')) {
+                    const row = lbl.closest('.form-group') || lbl.parentElement;
+                    if (row) {
+                        const change = row.querySelector('a[data-toggle="modal"], a.link');
+                        if (change) { change.click(); return 'change'; }
+                    }
+                }
+            }
+            return '';
+        """)
+        if clicked:
+            logger.info(f"[Step 8] 已点击 {clicked}")
+            time.sleep(1.5)
+        else:
+            logger.info("[Step 8] 未找到 Select country / Change 链接")
+    except Exception as e:
+        logger.info(f"[Step 8] 点击 Select country 失败: {e}")
+
+
+def _select_country_in_modal(tab, country_code: str):
+    """在已打开的弹窗中选择国家（快速重试）"""
     cc = country_code.upper()
-    for country_attempt in range(5):
+    # 快速重试等 modal 中的 select 渲染
+    for attempt in range(8):
         try:
-            selected = tab.run_js(f"""
-                const sel = document.querySelector('select[name="country"]');
+            result = tab.run_js(f"""
+                // 找到可见 modal 中的 select
+                const modals = document.querySelectorAll('.modal');
+                let sel = null;
+                for (const m of modals) {{
+                    if (m.classList.contains('in') || getComputedStyle(m).display !== 'none') {{
+                        sel = m.querySelector('select[name="country"]');
+                        if (sel) break;
+                    }}
+                }}
+                if (!sel) sel = document.querySelector('select[name="country"]');
                 if (!sel) return 'no_select';
+
+                // 设置值
                 sel.value = '{cc}';
                 sel.dispatchEvent(new Event('change', {{bubbles: true}}));
-                // 从 option 中获取国家全名
+
+                // 更新 Chosen UI
                 const opt = sel.querySelector('option[value="{cc}"]');
                 const name = opt ? opt.textContent.trim() : '{cc}';
                 const chosenSpan = document.querySelector('.chosen-single span');
                 if (chosenSpan) chosenSpan.textContent = name;
                 try {{
                     if (window.jQuery) {{
-                        jQuery('select[name="country"]').val('{cc}').trigger('chosen:updated').trigger('change');
+                        jQuery(sel).val('{cc}').trigger('chosen:updated').trigger('change');
                     }}
                 }} catch(e) {{}}
                 return sel.value;
             """)
-            if selected and selected != 'no_select':
-                break
+            if result and result != 'no_select':
+                logger.info(f"[Step 8] 国家已选择: {result}")
+                return
         except Exception:
             pass
-        if country_attempt < 4:
-            logger.info(f"[Step 8] select 元素未就绪，等待重试 ({country_attempt + 1}/5)...")
-            time.sleep(2)
+        if attempt < 7:
+            time.sleep(0.5)  # 快速重试，0.5 秒间隔
 
-    logger.info(f"[Step 8] 国家选择结果: {selected}")
-
-    if selected != cc:
-        # 通过 Chosen UI 下拉搜索选择（获取国家名用于搜索）
-        country_name = _get_country_name(cc)
-        try:
-            chosen = tab.ele(".chosen-container .chosen-single", timeout=3)
-            if chosen:
-                chosen.click()
-                time.sleep(0.5)
-                search = tab.ele(".chosen-container .chosen-search input", timeout=3)
-                if search:
-                    search.input(country_name)
-                    time.sleep(0.5)
-                    result_item = tab.ele(".chosen-results li", timeout=3)
-                    if result_item and country_name.lower() in (result_item.text or "").lower():
-                        result_item.click()
-                        logger.info(f"[Step 8] 通过 Chosen UI 选择了 {country_name}")
-                        time.sleep(0.5)
-        except Exception as e:
-            logger.warning(f"[Step 8] Chosen UI 操作失败: {e}")
-
-    # 第三步：点击 Save
-    save_clicked = False
+    logger.warning(f"[Step 8] select 元素始终未就绪，尝试 Chosen UI")
+    # 兜底：通过 Chosen UI 搜索选择
+    country_name = _get_country_name(cc)
     try:
-        # 精确匹配模态框内的 Save 按钮
-        save_btn = tab.ele("text:Save", timeout=5)
-        if save_btn:
-            save_btn.click()
-            save_clicked = True
-            logger.info("[Step 8] 已点击 Save")
-            time.sleep(3)
-    except Exception:
-        pass
+        chosen = tab.ele(".chosen-container .chosen-single", timeout=2)
+        if chosen:
+            chosen.click()
+            time.sleep(0.3)
+            search = tab.ele(".chosen-container .chosen-search input", timeout=2)
+            if search:
+                search.input(country_name)
+                time.sleep(0.5)
+                result_item = tab.ele(".chosen-results li", timeout=2)
+                if result_item and country_name.lower() in (result_item.text or "").lower():
+                    result_item.click()
+                    logger.info(f"[Step 8] Chosen UI 选择了 {country_name}")
+    except Exception as e:
+        logger.warning(f"[Step 8] Chosen UI 操作也失败: {e}")
 
-    if not save_clicked:
-        # JS 兜底
-        try:
-            tab.run_js("""
-                const modals = document.querySelectorAll('.modal');
-                for (const m of modals) {
-                    if (m.classList.contains('in') || m.style.display === 'block' || getComputedStyle(m).display !== 'none') {
-                        const btn = m.querySelector('button.btn-primary');
-                        if (btn && btn.textContent.trim() === 'Save') { btn.click(); return; }
+
+def _click_save_button(tab):
+    """点击弹窗中的 Save 按钮"""
+    try:
+        clicked = tab.run_js("""
+            // 找可见 modal 中的 Save
+            const modals = document.querySelectorAll('.modal');
+            for (const m of modals) {
+                if (m.classList.contains('in') || getComputedStyle(m).display !== 'none') {
+                    const btn = m.querySelector('button.btn-primary, button[type="submit"]');
+                    if (btn && (btn.textContent||'').trim() === 'Save') {
+                        btn.click(); return 'modal_save';
                     }
                 }
-                const allSave = document.querySelectorAll('button.btn-primary');
-                for (const b of allSave) {
-                    if (b.textContent.trim() === 'Save' && b.offsetParent !== null) { b.click(); return; }
-                }
-            """)
-            logger.info("[Step 8] JS 兜底点击 Save")
-            time.sleep(2)
-        except Exception as e:
-            logger.warning(f"[Step 8] 点击 Save 失败: {e}")
-
-    time.sleep(1.5)
-
-    # 第四步：点击 "Add credit card"
-    try:
-        tab.wait.doc_loaded(timeout=15)
-        time.sleep(1.5)
-
-        for attempt in range(10):
-            try:
-                add_card = tab.ele("text:Add credit card", timeout=2)
-                if add_card:
-                    add_card.click()
-                    logger.info("[Step 8] 已点击 Add credit card")
-                    time.sleep(2)
-                    return True
-            except Exception:
-                pass
-            time.sleep(1.5)
-
-        # JS 兜底
-        tab.run_js("""
-            const links = document.querySelectorAll('a, button');
-            for (const l of links) {
-                if ((l.textContent||'').trim().includes('Add credit card')) { l.click(); return; }
             }
+            // 兜底：任意可见 Save
+            const all = document.querySelectorAll('button.btn-primary');
+            for (const b of all) {
+                if ((b.textContent||'').trim() === 'Save' && b.offsetParent !== null) {
+                    b.click(); return 'fallback_save';
+                }
+            }
+            return '';
         """)
-        logger.info("[Step 8] JS 兜底点击 Add credit card")
-        time.sleep(2)
-        return True
+        if clicked:
+            logger.info(f"[Step 8] 已点击 Save ({clicked})")
+            time.sleep(2)
+        else:
+            logger.info("[Step 8] 未找到 Save 按钮（可能不需要）")
     except Exception as e:
-        logger.warning(f"[Step 8] 点击 Add credit card 失败: {e}")
-        return False
+        logger.warning(f"[Step 8] 点击 Save 失败: {e}")
 
 
-def _wait_tokens_page_ready(tab, timeout: int = 20):
+def _click_add_credit_card(tab) -> bool:
+    """点击 Add credit card 按钮（快速重试）"""
+    for attempt in range(6):
+        try:
+            clicked = tab.run_js("""
+                const els = document.querySelectorAll('a, button, span');
+                for (const el of els) {
+                    if ((el.textContent||'').trim() === 'Add credit card' && el.offsetParent !== null) {
+                        el.click(); return true;
+                    }
+                }
+                return false;
+            """)
+            if clicked:
+                logger.info(f"[Step 8] 已点击 Add credit card (尝试 {attempt+1})")
+                time.sleep(1.5)
+                return True
+        except Exception:
+            pass
+        time.sleep(1)
+
+    logger.warning("[Step 8] Add credit card 按钮未找到")
+    return False
+
+
+def _wait_tokens_page_ready(tab, timeout: int = 15):
     """
-    等待 tokens 页面 SPA 内容真正加载完成。
-    tokens 页通过 JS 异步渲染，doc_loaded 完成不代表内容已就绪。
+    等待 tokens 页面 SPA 核心内容渲染完成。
+    检测可操作元素（而非泛文本），快速轮询。
     """
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
-            # 检查是否有 tokens 页面特征元素
-            has_content = tab.run_js("""
-                return !!(
-                    document.querySelector('select[name="country"]')
-                    || document.querySelector('.chosen-container')
-                    || document.querySelector('a[href*="credit"]')
-                    || (document.body.textContent || '').includes('Select country')
-                    || (document.body.textContent || '').includes('Add credit card')
-                    || (document.body.textContent || '').includes('Tokens')
-                );
+            ready = tab.run_js("""
+                // 有可操作按钮/链接 = 页面就绪
+                const els = document.querySelectorAll('a, button, span');
+                for (const el of els) {
+                    const t = (el.textContent||'').trim();
+                    if (t === 'Add credit card' || t === 'Select country'
+                        || t === 'Select' || t === 'Change') {
+                        if (el.offsetParent !== null) return true;
+                    }
+                }
+                // 或者已有 country select
+                if (document.querySelector('select[name="country"]')) return true;
+                return false;
             """)
-            if has_content:
-                logger.info("[Step 8] tokens 页面内容已就绪")
+            if ready:
+                logger.info("[Step 8] tokens 页面已就绪")
                 return
         except Exception:
             pass
-        time.sleep(1.5)
-    logger.warning("[Step 8] tokens 页面内容加载超时，继续尝试操作")
+        time.sleep(0.8)
+    logger.warning("[Step 8] tokens 页面加载超时，继续操作")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1710,6 +1961,9 @@ def register_one(
     country: str = "JP",
     on_status: StatusCallback | None = None,
     cancel_check: Callable[[], bool] | None = None,
+    incognito: bool = True,
+    auto_select_country: bool = True,
+    auto_click_add_card: bool = True,
 ) -> AccountResult:
     """
     执行一次完整的全自动注册流程。
@@ -1790,7 +2044,7 @@ def register_one(
         # 启动浏览器（如指纹浏览器可用，自动生成独立指纹）
         _update(0, "启动浏览器...")
         fp_seed = random.randint(10_000_000, 2_000_000_000) if _is_fingerprint_enabled() else None
-        browser, fp_info, data_dir = _create_browser(browser_type, fp_seed=fp_seed)
+        browser, fp_info, data_dir = _create_browser(browser_type, fp_seed=fp_seed, incognito=incognito)
         if fp_info:
             logger.info(f"[Task {task_id}] 指纹浏览器已启动 seed={fp_info['seed']} "
                          f"{fp_info['platform']}/{fp_info['brand']}")
@@ -1826,6 +2080,8 @@ def register_one(
         if _is_cancelled():
             return _fail("用户停止了任务")
         _update(3, "填写邮箱")
+        # 记录邮箱提交时间（用于 Step 6 过滤旧邮件）
+        email_submit_ts = int(time.time() * 1000)
         if not _fill_email(tab, email):
             return _fail("填写邮箱失败")
 
@@ -1915,7 +2171,7 @@ def register_one(
             tab.run_js(f'document.title = "#{task_id} 等验证码..."')
         except Exception:
             pass
-        if not _fill_verification_code(tab, email):
+        if not _fill_verification_code(tab, email, task_id=task_id, email_start_ts=email_submit_ts):
             return _fail("填写验证码失败")
 
         # Step 7
@@ -1940,7 +2196,9 @@ def register_one(
         if not _check_browser_alive():
             return _fail("浏览器进程已退出")
         _update(8, "设置国家/支付方式")
-        _setup_tokens_page(tab, country_code=country)
+        _setup_tokens_page(tab, country_code=country,
+                           do_select_country=auto_select_country,
+                           do_click_add_card=auto_click_add_card)
 
         try:
             tab.run_js(f'document.title = "#{task_id} ✅ 完成 - 请填写信用卡"')
@@ -2481,3 +2739,528 @@ def _type_into_input(inp, value: str, frame=None):
                 except Exception:
                     pass
         time.sleep(0.3)
+
+
+# ═══════════════════════════════════════════════════════════
+#  一键登录 + 检测绑卡状态
+# ═══════════════════════════════════════════════════════════
+
+LOGIN_URL = "https://account.jetbrains.com/login"
+PAYMENT_METHODS_URL = "https://account.jetbrains.com/licenses/payment-methods"
+ADD_CARD_URL = "https://account.jetbrains.com/licenses/tokens"
+
+
+PROFILE_URL = "https://account.jetbrains.com/profile-details"
+
+
+@dataclass
+class LoginResult:
+    """登录+检测结果"""
+    email: str
+    password: str
+    login_ok: bool = False
+    has_card: bool = False
+    browser: object = None    # 保留浏览器实例
+    port: int = 0             # debug 端口
+    error: str = ""
+    card_detail: str = ""     # 绑卡详情（如卡号末四位）
+    country: str = ""         # 国家代码（如 JP, US）
+    country_name: str = ""    # 国家名称（如 Japan）
+
+
+def login_and_check(
+    email: str,
+    password: str,
+    browser_type: str = "chrome",
+    goto_card_page: bool = True,
+    country: str = "JP",
+    incognito: bool = True,
+) -> LoginResult:
+    """
+    一键登录已注册的 JetBrains 账号并检测绑卡状态。
+    流程：
+      1. 启动浏览器 → 导航到登录页
+      2. 选择 "Continue with email" → 填写邮箱
+      3. 填写密码 → 点击 Sign In
+      4. 等待登录成功（检测页面跳转）
+      5. 导航到 payment-methods 页 → 检测是否已绑卡
+      6. 如果 goto_card_page=True 且未绑卡 → 跳转到 tokens 页面准备绑卡
+    """
+    result = LoginResult(email=email, password=password)
+    browser = None
+    data_dir = None
+
+    try:
+        # 1. 启动浏览器
+        logger.info(f"[Login] 启动浏览器，登录 {email}...")
+        browser, fp_info, data_dir = _create_browser(browser_type, incognito=incognito)
+        tab = browser.latest_tab
+        result.browser = browser
+
+        # 获取 debug 端口
+        try:
+            result.port = browser.address.split(":")[-1]
+            result.port = int(result.port)
+        except Exception:
+            result.port = 0
+
+        # 设置窗口标题
+        try:
+            tab.run_js(f'document.title = "登录中: {email[:30]}..."')
+        except Exception:
+            pass
+
+        # 2. 导航到登录页
+        if not _safe_get(tab, LOGIN_URL, timeout=30):
+            result.error = "登录页加载失败"
+            return result
+        time.sleep(2)
+
+        # 处理 Cookie
+        _inject_cookie_killer(tab)
+        _dismiss_cookie_banner(tab)
+
+        # 3. 点击 "Continue with email"
+        try:
+            btn = tab.ele("text:Continue with email", timeout=8)
+            if btn:
+                btn.click()
+                time.sleep(1.5)
+                logger.info("[Login] 已点击 Continue with email")
+        except Exception:
+            logger.info("[Login] 未找到 Continue with email，可能已在邮箱输入页")
+
+        # 4. 填写邮箱
+        email_input = None
+        for selector in ["@name=email", "@placeholder=Email", "@type=email", "tag:input"]:
+            try:
+                email_input = tab.ele(selector, timeout=5)
+                if email_input:
+                    break
+            except Exception:
+                pass
+
+        if not email_input:
+            result.error = "未找到邮箱输入框"
+            return result
+
+        email_input.clear()
+        email_input.input(email)
+        time.sleep(0.5)
+
+        # 点击 Continue/Submit
+        try:
+            tab.run_js("""
+                const btn = document.querySelector('button[type="submit"]');
+                if (btn) btn.click();
+            """)
+        except Exception:
+            try:
+                submit_btn = tab.ele("@type=submit", timeout=3)
+                if submit_btn:
+                    submit_btn.click()
+            except Exception:
+                pass
+
+        time.sleep(2)
+
+        # 5. 填写密码
+        # 等待密码页面加载（快速检测，最多 ~12 秒）
+        pwd_input = None
+        for wait in range(8):
+            try:
+                pwd_input = tab.ele("@type=password", timeout=1.5)
+                if pwd_input:
+                    break
+            except Exception:
+                pass
+
+            # 快速检测账号不存在 / 页面异常
+            try:
+                page_state = tab.run_js("""
+                    const txt = (document.body.innerText || '').toLowerCase();
+                    // 账号不存在
+                    if (txt.includes('no account found') || txt.includes('account not found')
+                        || txt.includes("we couldn't find") || txt.includes('does not exist')
+                        || txt.includes('no user found') || txt.includes('user not found')
+                        || txt.includes('not registered'))
+                        return 'no_account';
+                    // 需要邮箱验证码登录（passwordless / magic link）
+                    if (txt.includes('check your email') || txt.includes('verification code')
+                        || txt.includes('enter the code') || txt.includes('we sent'))
+                        return 'otp_login';
+                    // reCAPTCHA 出现
+                    if (document.querySelector('iframe[title*="reCAPTCHA"]'))
+                        return 'captcha';
+                    return '';
+                """)
+                if page_state == 'no_account':
+                    result.error = "账号不存在"
+                    try:
+                        tab.run_js(f'document.title = "✗ {email[:25]} - 账号不存在"')
+                    except Exception:
+                        pass
+                    return result
+                if page_state == 'otp_login':
+                    result.error = "该账号需要邮箱验证码登录，无法自动登录"
+                    try:
+                        tab.run_js(f'document.title = "⚠ {email[:25]} - 需验证码登录"')
+                    except Exception:
+                        pass
+                    return result
+            except Exception:
+                pass
+
+            time.sleep(0.5)
+
+        if not pwd_input:
+            # 最后一次检查页面状态给出更精确的错误
+            error_detail = "未找到密码输入框"
+            try:
+                page_text = tab.run_js("return (document.body.innerText || '').substring(0, 500)") or ""
+                if "captcha" in page_text.lower() or "robot" in page_text.lower():
+                    error_detail = "登录页需要人机验证，请手动完成"
+                elif "check your" in page_text.lower() or "code" in page_text.lower():
+                    error_detail = "该账号需要邮箱验证码登录"
+                else:
+                    error_detail = "账号可能不存在或页面异常"
+            except Exception:
+                pass
+            result.error = error_detail
+            try:
+                tab.run_js(f'document.title = "✗ {email[:25]} - {error_detail[:20]}"')
+            except Exception:
+                pass
+            return result
+
+        pwd_input.clear()
+        pwd_input.input(password)
+        time.sleep(0.5)
+
+        # 点击 Sign In
+        for sign_try in range(3):
+            try:
+                tab.run_js("""
+                    const form = document.querySelector('form');
+                    if (form && typeof form.requestSubmit === 'function') {
+                        form.requestSubmit();
+                    } else {
+                        const btn = document.querySelector('button[type="submit"]');
+                        if (btn) btn.click();
+                    }
+                """)
+            except Exception:
+                try:
+                    btn = tab.ele("@type=submit", timeout=2)
+                    if btn:
+                        btn.click()
+                except Exception:
+                    pass
+
+            time.sleep(3)
+
+            # 检查是否登录成功（不在登录页了）
+            try:
+                current_url = tab.url or ""
+                if "/login" not in current_url and "signup" not in current_url:
+                    logger.info(f"[Login] 登录成功，当前 URL: {current_url}")
+                    result.login_ok = True
+                    break
+                # 检查是否有错误提示
+                page_text = tab.run_js("return (document.body.innerText || '').toLowerCase()") or ""
+                if "incorrect" in page_text or "invalid" in page_text or "wrong" in page_text:
+                    result.error = "密码错误或账号不存在"
+                    try:
+                        tab.run_js(f'document.title = "✗ {email[:25]} - 密码错误"')
+                    except Exception:
+                        pass
+                    return result
+            except Exception:
+                pass
+
+        if not result.login_ok:
+            # 最后再检查一次
+            try:
+                current_url = tab.url or ""
+                if "/login" not in current_url and "signup" not in current_url:
+                    result.login_ok = True
+                else:
+                    result.error = "登录超时（可能需要验证码或两步验证）"
+                    try:
+                        tab.run_js(f'document.title = "⚠ {email[:25]} - 需手动登录"')
+                    except Exception:
+                        pass
+                    return result
+            except Exception:
+                result.error = "无法确认登录状态"
+                return result
+
+        # 6. 检测国家
+        logger.info(f"[Login] {email} 登录成功，检测国家和绑卡状态...")
+        try:
+            tab.run_js(f'document.title = "检测中: {email[:25]}..."')
+        except Exception:
+            pass
+
+        result.country, result.country_name = _check_country(tab)
+        if result.country:
+            logger.info(f"[Login] {email} 国家: {result.country_name} ({result.country})")
+
+        # 7. 检测绑卡状态
+        result.has_card, result.card_detail = _check_payment_methods(tab)
+
+        # 7. 跳转到目标页面
+        if goto_card_page:
+            if result.has_card:
+                # 已绑卡 → 停留在 payment-methods 让用户看
+                try:
+                    tab.run_js(f'document.title = "✓ {email[:20]} - 已绑卡 {result.card_detail}"')
+                except Exception:
+                    pass
+                logger.info(f"[Login] {email} 已绑卡: {result.card_detail}")
+            else:
+                # 未绑卡 → 跳转到 tokens 页面准备绑卡
+                logger.info(f"[Login] {email} 未绑卡，跳转到绑卡页...")
+                _setup_tokens_page(tab, country_code=country)
+                try:
+                    tab.run_js(f'document.title = "✗ {email[:20]} - 未绑卡 - 请填卡"')
+                except Exception:
+                    pass
+        else:
+            try:
+                status_text = "已绑卡" if result.has_card else "未绑卡"
+                tab.run_js(f'document.title = "{email[:25]} - {status_text}"')
+            except Exception:
+                pass
+
+        return result
+
+    except Exception as e:
+        logger.error(f"[Login] {email} 异常: {e}", exc_info=True)
+        result.error = str(e)
+        return result
+
+
+def _check_country(tab) -> tuple[str, str]:
+    """
+    导航到 profile-details 页面，读取账号的 Country/Region。
+    返回 (country_code, country_name)，如 ("JP", "Japan")。
+    """
+    try:
+        tab.get(PROFILE_URL)
+        tab.wait.doc_loaded(timeout=15)
+    except Exception as e:
+        logger.warning(f"[CheckCountry] 导航到 profile-details 失败: {e}")
+        return "", ""
+
+    time.sleep(2)
+
+    try:
+        result = tab.run_js("""
+            // 方法1: 从 select[name="country"] 的 selected option 读取
+            const sel = document.querySelector('select[name="country"]');
+            if (sel) {
+                const opt = sel.querySelector('option[selected]');
+                if (opt) {
+                    return JSON.stringify({code: opt.value, name: opt.textContent.trim()});
+                }
+                // 备选: selected index
+                if (sel.selectedIndex >= 0) {
+                    const o = sel.options[sel.selectedIndex];
+                    return JSON.stringify({code: o.value, name: o.textContent.trim()});
+                }
+            }
+            // 方法2: 从页面文本匹配 "国家名 (XX)" 格式
+            const txt = document.body.textContent || '';
+            const m = txt.match(/Country\\/Region[\\s\\S]*?([A-Z][a-zA-Z\\s().'-]+?)\\s*\\(([A-Z]{2})\\)/);
+            if (m) {
+                return JSON.stringify({code: m[2], name: m[1].trim()});
+            }
+            return '';
+        """)
+
+        if result:
+            import json as _json
+            data = _json.loads(result)
+            code = data.get("code", "")
+            name = data.get("name", "")
+            if code:
+                return code.upper(), name
+    except Exception as e:
+        logger.warning(f"[CheckCountry] 解析国家失败: {e}")
+
+    return "", ""
+
+
+def _check_payment_methods(tab, navigate: bool = True) -> tuple[bool, str]:
+    """
+    检测是否已绑卡。通过 tokens 页面（而非 payment-methods 空白假页面）。
+
+    Args:
+        tab: 浏览器标签页
+        navigate: 是否导航到 tokens 页面。False 时只检测当前页面内容（用于后台监测，
+                  避免打断用户正在操作的页面）
+    返回 (has_card: bool, detail: str)
+    """
+    if navigate:
+        try:
+            tab.get(ADD_CARD_URL)
+            tab.wait.doc_loaded(timeout=20)
+        except Exception as e:
+            logger.warning(f"[CheckCard] 导航到 tokens 页失败: {e}")
+            return False, ""
+
+        time.sleep(3)
+
+        # 处理 Cookie 弹窗
+        _inject_cookie_killer(tab)
+        _dismiss_cookie_banner(tab)
+
+        # 等待 tokens 页面 SPA 内容加载
+        for wait_i in range(10):
+            try:
+                has_content = tab.run_js("""
+                    const txt = document.body.textContent || '';
+                    return txt.includes('Add credit card') || txt.includes('Saved Card')
+                        || txt.includes('credit card') || txt.includes('Tokens')
+                        || txt.includes('Select country');
+                """)
+                if has_content:
+                    break
+            except Exception:
+                pass
+            time.sleep(1.5)
+
+    # 分析页面内容（tokens 页和 payment-methods 页通用的检测逻辑）
+    try:
+        result = tab.run_js("""
+            const txt = document.body.textContent || '';
+            const html = document.body.innerHTML || '';
+
+            // 检测已绑卡: 卡号末四位 •••• 1234
+            const savedCardMatch = html.match(/[•·*]{2,}\\s*(\\d{4})/);
+            if (savedCardMatch) {
+                return JSON.stringify({has_card: true, detail: '****' + savedCardMatch[1]});
+            }
+
+            // Saved Card 文字（tokens 页绑卡后会显示）
+            if (/Saved Cards?/i.test(txt) && !/0\\s+Saved Cards/i.test(txt) && !/No saved cards/i.test(txt)) {
+                return JSON.stringify({has_card: true, detail: '已绑卡'});
+            }
+
+            // savedCreditCard 元素
+            if (html.includes('savedCreditCard') || html.includes('card-last-four')) {
+                const lastFour = html.match(/last.*?four.*?(\\d{4})/i) || html.match(/card-last-four.*?(\\d{4})/);
+                const detail = lastFour ? '****' + lastFour[1] : '已绑卡';
+                return JSON.stringify({has_card: true, detail: detail});
+            }
+
+            // Visa/Mastercard 等品牌标志 + 数字
+            if (/(?:Visa|Master|Mastercard|AmEx|American Express|Discover|JCB|UnionPay).*?\\d{4}/i.test(txt)) {
+                const brand = txt.match(/(Visa|Master(?:card)?|AmEx|American Express|Discover|JCB|UnionPay)/i);
+                const num = txt.match(/(?:Visa|Master|Mastercard|AmEx|American Express|Discover|JCB|UnionPay).*?(\\d{4})/i);
+                const detail = (brand ? brand[1] + ' ' : '') + (num ? '****' + num[1] : '');
+                return JSON.stringify({has_card: true, detail: detail.trim()});
+            }
+
+            // Adyen iframe 存在 = 正在填卡表单中（还没绑成功）
+            if (html.includes('adyen') || document.querySelector('iframe[title*="card"]')) {
+                return JSON.stringify({has_card: false, detail: ''});
+            }
+
+            // "Add credit card" 按钮存在 = 还没绑卡
+            if (/Add credit card/i.test(txt)) {
+                return JSON.stringify({has_card: false, detail: ''});
+            }
+
+            return JSON.stringify({has_card: false, detail: ''});
+        """)
+
+        if result:
+            import json as _json
+            data = _json.loads(result)
+            return data.get("has_card", False), data.get("detail", "")
+    except Exception as e:
+        logger.warning(f"[CheckCard] 分析绑卡状态失败: {e}")
+
+    return False, ""
+
+
+def login_batch(
+    accounts: list[dict],
+    browser_type: str = "chrome",
+    goto_card_page: bool = True,
+    country: str = "JP",
+    incognito: bool = True,
+    on_progress: Callable | None = None,
+    max_workers: int = 0,
+) -> list[LoginResult]:
+    """
+    批量一键登录并检测绑卡状态（并发执行，一次性打开所有浏览器）。
+    accounts: [{"email": "...", "password": "..."}, ...]
+    on_progress: 可选回调 (index, total, result) → void
+    max_workers: 最大并发数。0 = 等于账号数（全部同时打开）
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    total = len(accounts)
+    # 结果列表，按原索引存放
+    results: list[LoginResult | None] = [None] * total
+    # 并发数：默认全部同时，但上限 10 避免系统资源爆炸
+    workers = max_workers if max_workers > 0 else min(total, 10)
+
+    # 进度计数器（线程安全）
+    _done_count = [0]
+    _done_lock = threading.Lock()
+
+    def _run_one(index: int, acc: dict) -> tuple[int, LoginResult]:
+        email = acc.get("email", "")
+        password = acc.get("password", "")
+
+        if not email or not password:
+            return index, LoginResult(email=email, password=password, error="邮箱或密码为空")
+
+        logger.info(f"[LoginBatch] ({index+1}/{total}) 并发登录 {email}...")
+        # 错开浏览器启动，避免同时创建进程导致资源竞争
+        stagger = index * config.DELAY_BROWSER_STAGGER
+        if stagger > 0:
+            time.sleep(stagger)
+
+        r = login_and_check(
+            email=email,
+            password=password,
+            browser_type=browser_type,
+            goto_card_page=goto_card_page,
+            country=country,
+            incognito=incognito,
+        )
+        return index, r
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            executor.submit(_run_one, i, acc): i
+            for i, acc in enumerate(accounts)
+        }
+
+        for future in as_completed(futures):
+            try:
+                idx, r = future.result()
+            except Exception as e:
+                idx = futures[future]
+                acc = accounts[idx]
+                r = LoginResult(
+                    email=acc.get("email", ""),
+                    password=acc.get("password", ""),
+                    error=f"未捕获异常: {str(e)[:80]}",
+                )
+
+            results[idx] = r
+
+            with _done_lock:
+                _done_count[0] += 1
+
+            if on_progress:
+                on_progress(idx, total, r)
+
+    # 清理 None（理论上不会有）
+    return [r if r else LoginResult(email="?", password="?", error="未执行") for r in results]
