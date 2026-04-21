@@ -1,6 +1,6 @@
-# Fingerprint_JetBrains — 账号半自动批量注册机
+# Fingerprint_reg — 账号半自动批量注册机
 
-一键批量注册 JetBrains 账号，独立指纹浏览器 + 全流程自动化 + Web 控制面板。你只需要手动点几下图片验证码，剩下的全部自动完成。
+一键批量注册账号，独立指纹浏览器 + 全流程自动化 + Web 控制面板。你只需要手动点几下图片验证码，剩下的全部自动完成。
 
 ---
 
@@ -38,7 +38,7 @@
 | **Python 3.10+** | 运行环境，安装时**必须勾选** "Add Python to PATH" | https://www.python.org/downloads/ |
 | **YYDS Mail API Key** | 临时邮箱服务，需注册获取 Key | https://vip.215.im/api-keys |
 | **指纹浏览器**（可选） | 放到 `Chromium/Application/` 目录下，不放则使用系统 Chrome/Edge | 自备 fingerprint-chromium |
-| **梯子 / VPN** | 中国大陆用户需要，访问 Google 验证码和 JetBrains | — |
+| **梯子 / VPN** | 中国大陆用户需要，访问 Google 验证码和  | — |
 
 > Python 依赖（DrissionPage、FastAPI 等）不需要单独下载，一条命令自动安装。
 
@@ -57,7 +57,7 @@ pip install -r requirements.txt
 
 **4.** 启动程序：
 ```bash
-python -m jetbrainsreg
+python -m reg
 ```
 
 **5.** 浏览器自动打开 Web 控制面板 → **首次使用先在顶部填入 YYDS Mail API Key 并保存** → 设置密码和窗口数 → 点「开始注册」
@@ -73,7 +73,7 @@ python -m jetbrainsreg
 ```
 步骤 1  自动申请临时邮箱（YYDS Mail API）
   ↓
-步骤 2  打开 JetBrains 注册页 → 自动填入邮箱 → 点击 Continue
+步骤 2  打开  注册页 → 自动填入邮箱 → 点击 Continue
   ↓
 步骤 3  自动点击 reCAPTCHA "I'm not a robot" 复选框
   ↓
@@ -130,11 +130,11 @@ python -m jetbrainsreg
 
 放置位置（脚本自动搜索）：
 ```
-JetBrainsReg/
+Reg/
 ├── Chromium/
 │   └── Application/
 │       └── chrome.exe        ← 指纹浏览器放这里
-├── jetbrainsreg/
+├── reg/
 ├── requirements.txt
 └── ...
 ```
@@ -159,13 +159,13 @@ JetBrainsReg/
 ## 项目结构
 
 ```
-JetBrainsReg/
+Reg/
 ├── README.md                ← 项目说明
 ├── 使用教程.txt              ← 详细使用教程
 ├── 启动.bat                  ← 双击启动
 ├── requirements.txt          ← Python 依赖
 ├── Chromium/                 ← 指纹浏览器（可选）
-├── jetbrainsreg/             ← 主程序
+├── reg/             ← 主程序
 │   ├── main.py               ← 启动入口
 │   ├── server.py             ← Web 控制面板后端（FastAPI + WebSocket）
 │   ├── register.py           ← 注册流程（8步自动化）+ 一键登录 + 填卡
@@ -213,4 +213,4 @@ Python 3.10+ / DrissionPage / FastAPI / WebSocket / YYDS Mail API / fingerprint-
 
 ## 免责声明
 
-本项目仅供学习和研究自动化技术使用。使用者应遵守 JetBrains 的服务条款和相关法律法规。作者不对因使用本工具造成的任何后果承担责任。
+本项目仅供学习和研究自动化技术使用。使用者应遵守  的服务条款和相关法律法规。作者不对因使用本工具造成的任何后果承担责任。
