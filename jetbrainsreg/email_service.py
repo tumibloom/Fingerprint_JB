@@ -276,13 +276,20 @@ def extract_verification_code(mail_content: str) -> str | None:
     return None
 
 
+class CancelledError(Exception):
+    """轮询被外部取消"""
+    pass
+
+
 def poll_verification_code(
     email: str,
     timeout: float | None = None,
     interval: float | None = None,
+    cancel_check: callable = None,
 ) -> str:
     """
     轮询等待验证码邮件到达，提取并返回验证码。
+    cancel_check: 可选的取消检查函数，返回 True 表示应停止轮询。
     """
     if timeout is None:
         timeout = config.EMAIL_POLL_TIMEOUT
@@ -295,6 +302,11 @@ def poll_verification_code(
     logger.info(f"开始轮询验证码: {email} (超时={timeout}s, 间隔={interval}s)")
 
     while time.time() < deadline:
+        # 每次轮询前检查是否被取消
+        if cancel_check and cancel_check():
+            logger.info(f"邮件轮询被取消: {email}")
+            raise CancelledError(f"邮件轮询被取消: {email}")
+
         attempt += 1
         try:
             mails = get_mails(email)
@@ -325,7 +337,12 @@ def poll_verification_code(
                     return code
 
         logger.debug(f"第{attempt}次轮询，未收到验证码，等待 {interval}s...")
-        time.sleep(interval)
+        # 分段 sleep 以便更快响应取消
+        for _ in range(max(1, int(interval / 0.5))):
+            if cancel_check and cancel_check():
+                logger.info(f"邮件轮询被取消: {email}")
+                raise CancelledError(f"邮件轮询被取消: {email}")
+            time.sleep(min(0.5, interval))
 
     raise TimeoutError(f"等待验证码超时 ({timeout}s): {email}")
 

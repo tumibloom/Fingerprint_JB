@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>JetBrainsReg</title>
+<title>FingerprintReg</title>
 <style>
 /* ── Midnight Frost (磨砂暗色) ── */
 [data-theme="dark"]{
@@ -156,11 +156,24 @@ input,select,button,textarea{font-family:inherit}
 .fav-tag .fav-rm{font-size:13px;margin-left:1px;opacity:.4;cursor:pointer;line-height:1}
 .fav-tag .fav-rm:hover{opacity:1;color:var(--error)}
 
+/* ═══ Fingerprint Toggle Switch ═══ */
+.fp-toggle{display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;user-select:none}
+.fp-toggle .fp-switch{position:relative;width:38px;height:20px;border-radius:10px;background:var(--muted);transition:background .2s;flex-shrink:0}
+.fp-toggle .fp-switch::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .2s}
+.fp-toggle input{display:none}
+.fp-toggle input:checked+.fp-switch{background:var(--accent)}
+.fp-toggle input:checked+.fp-switch::after{transform:translateX(18px)}
+.fp-toggle .fp-label{font-size:13px;color:var(--text)}
+.fp-toggle .fp-hint{font-size:11px;color:var(--muted)}
+.fp-toggle.master{padding:8px 0;margin-bottom:4px;border-bottom:1px solid var(--border)}
+.fp-toggle.master .fp-label{font-weight:700;font-size:14px;color:var(--accent)}
+
 @media(max-width:768px){
   .task-card{grid-template-columns:40px 1fr 110px}.t-pwd{display:none}
   .summary{grid-template-columns:repeat(2,1fr)}
   .header{flex-direction:column;text-align:center;gap:12px}
   .theme-grid{grid-template-columns:repeat(2,1fr)}
+  #fpToggleFields{grid-template-columns:1fr!important}
 }
 </style>
 </head>
@@ -168,8 +181,8 @@ input,select,button,textarea{font-family:inherit}
 <div class="container">
   <div class="header">
     <div class="header-left">
-      <h1><span class="brand">JetBrains</span>Reg</h1>
-      <p>JetBrains 账号半自动注册机 -- 验证码由你搞定，其余全自动</p>
+      <h1><span class="brand">Fingerprint</span>Reg</h1>
+      <p>Fingerprint 账号注册机 -- 半自动 or 全自动，独立指纹批量注册</p>
     </div>
     <div class="header-right">
       <div style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text-secondary)">
@@ -195,9 +208,10 @@ input,select,button,textarea{font-family:inherit}
       </div>
     </div>
     <div class="row">
-      <div class="fg" style="flex:2"><label>统一密码</label><input type="text" id="password" value="hajimi123"></div>
+      <div class="fg" style="flex:2"><label>统一密码</label><input type="text" id="password" value="YourPassword123"></div>
       <div class="fg"><label>浏览器</label><select id="browser"><option value="fingerprint">指纹浏览器</option><option value="chrome">Chrome</option><option value="edge">Edge</option></select></div>
       <div class="fg" style="flex:0;min-width:auto;align-self:center;padding-top:20px"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap;font-size:14px;color:var(--text)"><input type="checkbox" id="incognito" checked style="width:18px;height:18px;accent-color:var(--accent)"> 隐私模式</label></div>
+      <div class="fg" style="flex:0;min-width:auto;align-self:center;padding-top:20px"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap;font-size:14px;color:var(--text)"><input type="checkbox" id="fullscreen" style="width:18px;height:18px;accent-color:var(--accent)"> 最大化窗口</label></div>
     </div>
     <div class="hint" style="margin-top:-10px;margin-bottom:10px">* 所有账号统一使用此密码</div>
     <input type="hidden" id="country" value="JP">
@@ -229,6 +243,25 @@ input,select,button,textarea{font-family:inherit}
       <span style="border-left:1px solid var(--border);height:16px;margin:0 2px"></span>
       <label style="display:flex;align-items:center;gap:4px;cursor:pointer;color:var(--text-secondary)" title="注册成功后自动在 tokens 页选择国家"><input type="checkbox" id="autoSelectCountry" checked style="accent-color:var(--accent)"> 自动选国家</label>
       <label style="display:flex;align-items:center;gap:4px;cursor:pointer;color:var(--text-secondary)" title="选完国家后自动点击 Add credit card 打开绑卡表单"><input type="checkbox" id="autoClickAddCard" checked style="accent-color:var(--accent)"> 自动点绑卡</label>
+      <span style="border-left:1px solid var(--border);height:16px;margin:0 2px"></span>
+      <label style="display:flex;align-items:center;gap:4px;cursor:pointer;color:var(--accent);font-weight:600" title="启用后验证码全自动：打码平台 → AI → 手动兜底"><input type="checkbox" id="aiCaptcha" style="accent-color:var(--accent)"> 全自动验证码</label>
+    </div>
+    <!-- 打码平台配置（折叠） -->
+    <div id="captchaConfigPanel" style="margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer" onclick="toggleCaptchaConfig()">
+        <span id="captchaConfigArrow" style="color:var(--muted);font-size:12px;transition:transform .2s">▶</span>
+        <span style="font-size:13px;color:var(--text-secondary);font-weight:600">打码平台配置</span>
+        <span id="captchaPlatformBadge" style="font-size:12px;color:var(--muted)">未配置</span>
+      </div>
+      <div id="captchaConfigBody" style="display:none;padding:12px 16px;background:var(--input-bg);border:1px solid var(--border);border-radius:8px">
+        <div class="row" style="margin-bottom:8px">
+          <div class="fg" style="flex:1"><label>平台</label><select id="captchaPlatform" style="padding:8px 12px;font-size:14px"><option value="">禁用</option><option value="yescaptcha">YesCaptcha</option><option value="capsolver">CapSolver</option></select></div>
+          <div class="fg" style="flex:2"><label>Client Key</label><input type="text" id="captchaClientKey" placeholder="打码平台的 API Key (clientKey)" style="padding:8px 12px;font-size:14px"></div>
+          <div class="fg" style="flex:0;min-width:auto;align-self:flex-end"><button class="btn btn-outline btn-sm" onclick="saveCaptchaConfig()">保存</button></div>
+        </div>
+        <div id="captchaConfigStatus" style="font-size:12px;color:var(--muted)"></div>
+        <div style="font-size:12px;color:var(--muted);margin-top:4px">不配置打码平台也可使用全自动验证码（AI 模式免费内置），打码平台优先级更高</div>
+      </div>
     </div>
     <div style="font-size:13px;color:var(--muted);margin-bottom:14px">每个窗口自动生成独立的随机英文名，无需手动修改</div>
     <div class="btn-row">
@@ -362,13 +395,20 @@ input,select,button,textarea{font-family:inherit}
     </div>
 
     <div class="cfg-section">
+      <h3>指纹伪装开关</h3>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:12px">控制指纹浏览器各项伪装特性。关闭某项后，该维度将使用真实值（降低伪装程度但提高兼容性）。</p>
+      <div id="fpToggleFields" style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px"></div>
+    </div>
+
+    <div class="cfg-section">
       <h3>延迟控制（秒）</h3>
       <div id="cfgFields"></div>
     </div>
 
     <div class="btn-row" style="justify-content:flex-end;margin-top:16px">
       <button class="btn btn-outline btn-sm" onclick="resetDelays()">恢复默认</button>
-      <button class="btn btn-accent" onclick="saveDelays()">保存</button>
+      <button class="btn btn-outline btn-sm" onclick="resetFpToggles()">重置指纹开关</button>
+      <button class="btn btn-accent" onclick="saveAllSettings()">保存</button>
     </div>
   </div>
 </div>
@@ -378,7 +418,7 @@ input,select,button,textarea{font-family:inherit}
   <div class="modal" style="position:relative;width:min(640px,92vw)">
     <button class="close-btn" onclick="closeImportModal()" style="position:absolute;top:16px;right:20px;background:none;border:none;color:var(--text-secondary);font-size:24px;cursor:pointer">&times;</button>
     <h2>导入账号</h2>
-    <p style="font-size:13px;color:var(--text-secondary);margin-bottom:14px">将已注册的 JetBrains 账号导入到列表中，自动标记为「未绑卡」，方便后续一键登录 + 绑卡。</p>
+    <p style="font-size:13px;color:var(--text-secondary);margin-bottom:14px">将已注册的账号导入到列表中，自动标记为「未绑卡」，方便后续一键登录 + 绑卡。</p>
 
     <div style="margin-bottom:14px">
       <label style="font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.4px">账号列表（每行一个）</label>
@@ -386,7 +426,7 @@ input,select,button,textarea{font-family:inherit}
     </div>
 
     <div class="row" style="margin-bottom:14px">
-      <div class="fg" style="flex:1.5"><label>默认密码（纯邮箱行使用）</label><input type="text" id="importDefaultPwd" value="hajimi123" placeholder="没有密码的行使用此密码"></div>
+      <div class="fg" style="flex:1.5"><label>默认密码（纯邮箱行使用）</label><input type="text" id="importDefaultPwd" value="YourPassword123" placeholder="没有密码的行使用此密码"></div>
       <div class="fg" style="flex:1"><label>导入后绑卡状态</label>
         <select id="importCardStatus" style="padding:12px 16px;background:var(--input-bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:15px">
           <option value="unbound">标记为「未绑卡」</option>
@@ -415,6 +455,7 @@ function setTheme(t){
 function openSettings(){
   document.getElementById('settingsOverlay').classList.add('open');
   loadDelayConfig();
+  loadFpToggles();
   const cur=document.documentElement.getAttribute('data-theme')||'dark';
   document.querySelectorAll('.theme-card').forEach(c=>c.classList.toggle('active',c.dataset.themeVal===cur));
 }
@@ -466,8 +507,6 @@ async function saveDelays(){
   for(const [k,v] of Object.entries(vals)){
     try{await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k,value:v})});}catch(e){}
   }
-  closeSettings();
-  showCardResult('ok','设置已保存');
 }
 
 function resetDelays(){
@@ -475,6 +514,100 @@ function resetDelays(){
     const el=document.getElementById('cfg_'+key);
     if(el) el.value=meta.def;
   }
+}
+
+/* ═══ Fingerprint Toggles ═══ */
+const FP_TOGGLE_META={
+  fp_enabled:     {label:'指纹伪装总开关',  hint:'关闭后所有指纹参数不生效', master:true},
+  fp_platform:    {label:'操作系统伪装',    hint:'windows/macos/linux'},
+  fp_brand:       {label:'浏览器品牌伪装',  hint:'Chrome/Edge/Opera/Vivaldi'},
+  fp_timezone:    {label:'时区伪装',        hint:'随机生成时区'},
+  fp_language:    {label:'语言伪装',        hint:'随机语言环境 (--lang)'},
+  fp_cpu:         {label:'CPU核心数伪装',   hint:'navigator.hardwareConcurrency'},
+  fp_memory:      {label:'内存大小伪装',    hint:'navigator.deviceMemory'},
+  fp_webrtc:      {label:'WebRTC防泄漏',    hint:'禁用非代理UDP连接'},
+  fp_canvas:      {label:'Canvas指纹伪装',  hint:'Canvas图像/文本噪声'},
+  fp_audio:       {label:'Audio指纹伪装',   hint:'AudioContext噪声'},
+  fp_font:        {label:'字体指纹伪装',    hint:'字体列表随机化'},
+  fp_clientrects: {label:'ClientRects伪装', hint:'DOM元素尺寸噪声'},
+  fp_gpu:         {label:'GPU/WebGL伪装',   hint:'GPU型号/渲染噪声'},
+  fp_webdriver:   {label:'隐藏Webdriver',   hint:'navigator.webdriver=false'},
+  fp_automation:  {label:'反自动化检测',    hint:'绕过CDP/自动化检测'},
+};
+let fpToggles={};
+
+async function loadFpToggles(){
+  try{const r=await fetch('/api/fingerprint-toggles');fpToggles=await r.json();}catch(e){fpToggles={};}
+  renderFpToggles();
+}
+
+function renderFpToggles(){
+  const container=document.getElementById('fpToggleFields');
+  let html='';
+  for(const [key,meta] of Object.entries(FP_TOGGLE_META)){
+    const checked=fpToggles[key]!==undefined?fpToggles[key]:true;
+    const cls=meta.master?'fp-toggle master':'fp-toggle';
+    const colspan=meta.master?'style="grid-column:1/-1"':'';
+    html+=`<label class="${cls}" ${colspan}>
+      <input type="checkbox" id="fpt_${key}" ${checked?'checked':''}
+        onchange="onFpToggleChange('${key}',this.checked)">
+      <span class="fp-switch"></span>
+      <span>
+        <span class="fp-label">${meta.label}</span>
+        <span class="fp-hint">${meta.hint}</span>
+      </span>
+    </label>`;
+  }
+  container.innerHTML=html;
+  _updateFpToggleDisabled();
+}
+
+function onFpToggleChange(key,val){
+  fpToggles[key]=val;
+  if(key==='fp_enabled') _updateFpToggleDisabled();
+}
+
+function _updateFpToggleDisabled(){
+  const master=fpToggles.fp_enabled!==false;
+  for(const key of Object.keys(FP_TOGGLE_META)){
+    if(key==='fp_enabled') continue;
+    const el=document.getElementById('fpt_'+key);
+    if(el){
+      el.disabled=!master;
+      el.closest('.fp-toggle').style.opacity=master?'1':'0.4';
+    }
+  }
+}
+
+function resetFpToggles(){
+  for(const key of Object.keys(FP_TOGGLE_META)){
+    fpToggles[key]=true;
+    const el=document.getElementById('fpt_'+key);
+    if(el) el.checked=true;
+  }
+  _updateFpToggleDisabled();
+}
+
+async function saveFpToggles(){
+  const vals={};
+  for(const key of Object.keys(FP_TOGGLE_META)){
+    const el=document.getElementById('fpt_'+key);
+    if(el) vals[key]=el.checked;
+  }
+  try{
+    await fetch('/api/fingerprint-toggles',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({toggles:vals})
+    });
+  }catch(e){console.error('保存指纹开关失败:',e);}
+}
+
+async function saveAllSettings(){
+  await saveDelays();
+  await saveFpToggles();
+  closeSettings();
+  showCardResult('ok','所有设置已保存');
 }
 
 // On page load: restore delays from localStorage and push to server
@@ -863,11 +996,11 @@ function updateSummary(){
 /* ═══ API ═══ */
 async function startReg(){
   const btn=document.getElementById('btnStart');btn.disabled=true;
-  try{const r=await fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:parseInt(document.getElementById('count').value)||3,password:document.getElementById('password').value,first_name:document.getElementById('firstName').value,last_name:document.getElementById('lastName').value,browser:document.getElementById('browser').value,country:document.getElementById('country').value,incognito:document.getElementById('incognito').checked,auto_select_country:document.getElementById('autoSelectCountry').checked,auto_click_add_card:document.getElementById('autoClickAddCard').checked})});const d=await r.json();if(!d.ok){alert(d.error||'启动失败');btn.disabled=false;}}catch(e){alert('请求失败: '+e.message);btn.disabled=false;}
+  try{const r=await fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:parseInt(document.getElementById('count').value)||3,password:document.getElementById('password').value,first_name:document.getElementById('firstName').value,last_name:document.getElementById('lastName').value,browser:document.getElementById('browser').value,country:document.getElementById('country').value,incognito:document.getElementById('incognito').checked,auto_select_country:document.getElementById('autoSelectCountry').checked,auto_click_add_card:document.getElementById('autoClickAddCard').checked,ai_captcha:document.getElementById('aiCaptcha').checked,fullscreen:document.getElementById('fullscreen').checked})});const d=await r.json();if(!d.ok){alert(d.error||'启动失败');btn.disabled=false;}}catch(e){alert('请求失败: '+e.message);btn.disabled=false;}
 }
 async function forceStartReg(){
   const btn=document.getElementById('btnForceStart');btn.disabled=true;btn.textContent='创建中...';
-  try{const r=await fetch('/api/force-start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:parseInt(document.getElementById('count').value)||3,password:document.getElementById('password').value,first_name:document.getElementById('firstName').value,last_name:document.getElementById('lastName').value,browser:document.getElementById('browser').value,country:document.getElementById('country').value,incognito:document.getElementById('incognito').checked,auto_select_country:document.getElementById('autoSelectCountry').checked,auto_click_add_card:document.getElementById('autoClickAddCard').checked})});const d=await r.json();if(!d.ok)alert(d.error||'启动失败');}catch(e){alert('请求失败: '+e.message);}
+  try{const r=await fetch('/api/force-start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:parseInt(document.getElementById('count').value)||3,password:document.getElementById('password').value,first_name:document.getElementById('firstName').value,last_name:document.getElementById('lastName').value,browser:document.getElementById('browser').value,country:document.getElementById('country').value,incognito:document.getElementById('incognito').checked,auto_select_country:document.getElementById('autoSelectCountry').checked,auto_click_add_card:document.getElementById('autoClickAddCard').checked,ai_captcha:document.getElementById('aiCaptcha').checked,fullscreen:document.getElementById('fullscreen').checked})});const d=await r.json();if(!d.ok)alert(d.error||'启动失败');}catch(e){alert('请求失败: '+e.message);}
   btn.disabled=false;btn.textContent='强制新建窗口';
 }
 async function stopReg(){await fetch('/api/stop',{method:'POST'});}
@@ -889,7 +1022,7 @@ async function killAllBrowsers(){
 /* ═══ 填卡 ═══ */
 async function refreshBrowsers(){
   try{const r=await fetch('/api/browsers');const d=await r.json();const sel=document.getElementById('cardTarget');sel.innerHTML='<option value="0">所有窗口（'+d.length+'个）</option>';
-  for(const b of d){const o=document.createElement('option');o.value=b.port||b.task_id||0;o.textContent=b.browser==='jetbrainsreg'?`注册 #${b.task_id} - ${b.email||''}`:`${b.browser} :${b.port} - ${(b.title||b.url||'').substring(0,35)}`;sel.appendChild(o);}
+  for(const b of d){const o=document.createElement('option');o.value=b.port||b.task_id||0;o.textContent=b.browser==='jetbrainsreg'?`指纹注册 #${b.task_id} - ${b.email||''}`:`${b.browser} :${b.port} - ${(b.title||b.url||'').substring(0,35)}`;sel.appendChild(o);}
   showCardResult(d.length?'ok':'warn',d.length?`扫描到 ${d.length} 个浏览器窗口`:'未检测到浏览器窗口');}catch(e){showCardResult('err','刷新失败: '+e.message);}
 }
 async function fillCard(){
@@ -917,7 +1050,7 @@ async function openBrowsers(){
   const btn=document.getElementById('btnOpenBrowser');btn.disabled=true;btn.textContent='打开中...';
   const cnt=parseInt(document.getElementById('openBrowserCount').value)||1,br=document.getElementById('openBrowserType').value;
   try{const r=await fetch('/api/open-browsers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:cnt,browser:br})});const d=await r.json();
-  if(d.ok){showCardResult('ok',d.message+' -- 请在弹出窗口中登录 JetBrains，然后导航到绑卡页');setTimeout(refreshBrowsers,2000);}else showCardResult('err',d.error||d.message||'打开失败');
+  if(d.ok){showCardResult('ok',d.message+' -- 请在弹出窗口中登录账号，然后导航到绑卡页');setTimeout(refreshBrowsers,2000);}else showCardResult('err',d.error||d.message||'打开失败');
   }catch(e){showCardResult('err','请求失败: '+e.message);}btn.disabled=false;btn.textContent='打开浏览器';
 }
 
@@ -981,7 +1114,7 @@ function openImportModal(){
   document.getElementById('importOverlay').classList.add('open');
   document.getElementById('importResult').style.display='none';
   // 同步默认密码
-  document.getElementById('importDefaultPwd').value=document.getElementById('password').value||'hajimi123';
+  document.getElementById('importDefaultPwd').value=document.getElementById('password').value||'YourPassword123';
 }
 function closeImportModal(){document.getElementById('importOverlay').classList.remove('open');}
 async function doImport(){
@@ -1066,6 +1199,7 @@ async function loginAndCheck(allAccounts){
         goto_card_page:true,
         country:document.getElementById('country').value||'JP',
         incognito:document.getElementById('incognito').checked,
+        fullscreen:document.getElementById('fullscreen').checked,
       })
     });
     const d=await r.json();
@@ -1163,7 +1297,7 @@ document.getElementById('cardNumber').addEventListener('input',function(){this.v
 
 /* ═══ 表单数据持久化 ═══ */
 const PERSIST_FIELDS=['password','browser','count','country','countryInput','cardNumber','cardExpiry','cardCvv','cardName','openBrowserCount','openBrowserType'];
-const PERSIST_CHECKS=['incognito','autoSelectCountry','autoClickAddCard'];
+const PERSIST_CHECKS=['incognito','fullscreen','autoSelectCountry','autoClickAddCard'];
 function saveFormData(){
   const data={};
   for(const id of PERSIST_FIELDS){const el=document.getElementById(id);if(el)data[id]=el.value;}
@@ -1226,10 +1360,63 @@ async function saveApiKey(){
   }catch(e){alert('请求失败: '+e.message);}
 }
 
+/* ═══ 打码平台配置管理 ═══ */
+let captchaConfigOpen=false;
+function toggleCaptchaConfig(){
+  captchaConfigOpen=!captchaConfigOpen;
+  document.getElementById('captchaConfigBody').style.display=captchaConfigOpen?'block':'none';
+  document.getElementById('captchaConfigArrow').style.transform=captchaConfigOpen?'rotate(90deg)':'';
+}
+async function loadCaptchaSettings(){
+  try{
+    const r=await fetch('/api/captcha-settings');
+    const d=await r.json();
+    const badge=document.getElementById('captchaPlatformBadge');
+    if(d.platform && d.client_key_set){
+      badge.textContent='✓ '+d.platform+(d.balance!=null?' (余额:'+d.balance+')':'');
+      badge.style.color='var(--success)';
+      document.getElementById('captchaPlatform').value=d.platform;
+      document.getElementById('captchaClientKey').placeholder='已配置 ('+d.client_key_masked+')，重新输入可覆盖';
+    }else{
+      badge.textContent='未配置（使用免费 AI 模式）';
+      badge.style.color='var(--muted)';
+    }
+  }catch(e){}
+}
+async function saveCaptchaConfig(){
+  const platform=document.getElementById('captchaPlatform').value;
+  const key=document.getElementById('captchaClientKey').value.trim();
+  const statusEl=document.getElementById('captchaConfigStatus');
+  if(platform && !key){
+    const badge=document.getElementById('captchaPlatformBadge');
+    // 如果已配置过，不输入 key 就是保留原来的，这种情况跳过验证
+    if(!badge.textContent.includes('✓')){
+      alert('请输入 Client Key');return;
+    }
+  }
+  statusEl.textContent='保存中...';statusEl.style.color='var(--accent)';
+  try{
+    const body={platform:platform};
+    if(key) body.client_key=key;
+    // 如果清除平台（选了"禁用"），也发空 key
+    if(!platform) body.client_key='';
+    const r=await fetch('/api/captcha-settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d=await r.json();
+    if(d.ok){
+      statusEl.textContent='✓ '+d.message;statusEl.style.color='var(--success)';
+      document.getElementById('captchaClientKey').value='';
+      loadCaptchaSettings();
+    }else{
+      statusEl.textContent='✗ '+(d.error||'保存失败');statusEl.style.color='var(--error)';
+    }
+  }catch(e){statusEl.textContent='请求失败';statusEl.style.color='var(--error)';}
+}
+
 /* ═══ 初始化 ═══ */
 restoreFormData();
 randomName(); randomCardName(); connectWS();
 loadApiKeyStatus();
+loadCaptchaSettings();
 </script>
 </body>
 </html>

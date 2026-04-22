@@ -1,7 +1,7 @@
 """
-JetBrainsReg 启动入口
+FingerprintReg 启动入口
 用法:
-    python -m jetbrainsreg            # 启动 Web 控制面板（默认端口 7860）
+    python -m jetbrainsreg            # 启动 Web 控制面板（默认端口 7777）
     python -m jetbrainsreg --port 8080
 """
 import argparse
@@ -16,11 +16,11 @@ import uvicorn
 
 def main():
     parser = argparse.ArgumentParser(
-        description="JetBrainsReg — JetBrains 账号半自动注册机",
+        description="FingerprintReg — Fingerprint 账号注册机（半自动/全自动）",
     )
     parser.add_argument(
-        "--port", type=int, default=7860,
-        help="Web 控制面板端口 (默认: 7860)",
+        "--port", type=int, default=7777,
+        help="Web 控制面板端口 (默认: 7777)",
     )
     parser.add_argument(
         "--host", type=str, default="127.0.0.1",
@@ -52,12 +52,19 @@ def main():
     url = f"http://{args.host}:{args.port}"
 
     print()
-    print("=" * 52)
-    print("  JetBrainsReg — Account Semi-Auto Registration")
-    print("=" * 52)
-    print(f"  Dashboard: {url}")
-    print(f"  Flow: Auto email -> You solve captcha -> Auto verify+register")
-    print("=" * 52)
+    print("=" * 60)
+    print("  FingerprintReg — Fingerprint 账号注册机")
+    print("  半自动 or 全自动，独立指纹，批量注册")
+    print("=" * 60)
+    print(f"  控制面板: {url}")
+    print(f"  模式: 全自动验证码(打码平台+AI) / 半自动(手动过验证码)")
+    print("-" * 60)
+    print("  使用攻略:")
+    print("    1. 首次使用请先在面板顶部填入 YYDS Mail API Key")
+    print("    2. 设置密码 → 选浏览器 → 选窗口数 → 点「开始注册」")
+    print("    3. 勾选「全自动验证码」可实现完全无人值守")
+    print("    4. 注册完成后可使用「一键填卡」批量绑卡")
+    print("=" * 60)
     print()
 
     # 等服务器就绪后再打开浏览器（轮询探测，避免 404）
@@ -77,12 +84,25 @@ def main():
             webbrowser.open(url)
         threading.Thread(target=_open, daemon=True).start()
 
-    uvicorn.run(
-        "jetbrainsreg.server:app",
-        host=args.host,
-        port=args.port,
-        log_level="warning",
-    )
+    try:
+        uvicorn.run(
+            "jetbrainsreg.server:app",
+            host=args.host,
+            port=args.port,
+            log_level="warning",
+        )
+    except KeyboardInterrupt:
+        print("\n已手动停止服务器。")
+    except OSError as e:
+        if "address already in use" in str(e).lower() or "只允许使用一次" in str(e):
+            print(f"\n错误: 端口 {args.port} 已被占用，请尝试 --port 指定其他端口")
+        else:
+            print(f"\n启动失败: {e}")
+        sys.exit(1)
+    except Exception as e:
+        logging.getLogger("jetbrainsreg").error(f"服务器异常退出: {e}", exc_info=True)
+        print(f"\n服务器异常退出: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

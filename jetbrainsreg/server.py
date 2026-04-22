@@ -1,5 +1,5 @@
 """
-JetBrainsReg Web 控制面板后端
+FingerprintReg Web 控制面板后端
 FastAPI + WebSocket 实时推送 + 线程池并发注册 + 结果持久化
 """
 import asyncio
@@ -21,11 +21,13 @@ from . import config
 from .register import (register_one, fill_card_info, clear_card_info, confirm_card,
                        scan_debug_browsers, connect_browser_by_port, open_browsers,
                        cleanup_stale_data_dirs, login_and_check, login_batch,
+                       reset_port_counter,
                        TaskStatus, AccountResult, LoginResult)
+from . import captcha_service
 
 logger = logging.getLogger("jetbrainsreg.server")
 
-app = FastAPI(title="JetBrainsReg", version="0.3.0")
+app = FastAPI(title="FingerprintReg", version="0.3.0")
 
 # ── 静态文件 ──
 STATIC_DIR = Path(__file__).parent / "static"
@@ -283,6 +285,8 @@ class StartRequest(BaseModel):
     incognito: bool = True   # 是否使用隐私模式
     auto_select_country: bool = True   # 注册后自动选择国家
     auto_click_add_card: bool = True   # 选国家后自动点 Add credit card
+    ai_captcha: bool = False  # 是否启用全自动验证码（打码平台/AI）
+    fullscreen: bool = False  # 是否最大化浏览器窗口
 
 
 class FillCardRequest(BaseModel):
@@ -298,7 +302,7 @@ async def index():
     html_path = STATIC_DIR / "index.html"
     if html_path.exists():
         return HTMLResponse(html_path.read_text(encoding="utf-8"))
-    return HTMLResponse("<h1>JetBrainsReg</h1><p>static/index.html not found</p>")
+    return HTMLResponse("<h1>FingerprintReg</h1><p>static/index.html not found</p>")
 
 
 @app.post("/api/start")
@@ -334,7 +338,7 @@ async def start_registration(req: StartRequest):
     thread = threading.Thread(
         target=_run_batch,
         args=(req.count, req.password, req.first_name, req.last_name, req.browser, req.country, req.incognito,
-              req.auto_select_country, req.auto_click_add_card),
+              req.auto_select_country, req.auto_click_add_card, req.ai_captcha, req.fullscreen),
         daemon=True,
     )
     thread.start()
@@ -639,9 +643,94 @@ async def update_config(req: UpdateConfigRequest):
     return {"ok": True, "key": req.key, "value": req.value}
 
 
+# ── 指纹功能开关 API ──
+
+@app.get("/api/fingerprint-toggles")
+async def get_fingerprint_toggles():
+    """获取指纹功能开关状态"""
+    return config.get_fingerprint_toggles()
+
+
+class FingerprintTogglesRequest(BaseModel):
+    toggles: dict = {}
+
+
+@app.post("/api/fingerprint-toggles")
+async def set_fingerprint_toggles(req: FingerprintTogglesRequest):
+    """保存指纹功能开关（运行时生效 + 持久化到 settings.json）"""
+    if not req.toggles:
+        return {"ok": False, "error": "未提供开关数据"}
+    try:
+        config.save_fingerprint_toggles(req.toggles)
+        logger.info(f"[Config] 指纹开关已更新: {req.toggles}")
+        return {"ok": True, "toggles": config.get_fingerprint_toggles()}
+    except Exception as e:
+        return {"ok": False, "error": f"保存失败: {e}"}
+
+
+# ── 打码平台配置 API ──
+
+class CaptchaConfigRequest(BaseModel):
+    platform: str = ""        # "yescaptcha" / "capsolver" / ""
+    client_key: str = ""      # API Key
+
+
+@app.get("/api/captcha-settings")
+async def get_captcha_settings():
+    """获取打码平台配置（脱敏显示）"""
+    platform = config.CAPTCHA_PLATFORM
+    key = config.CAPTCHA_CLIENT_KEY
+    masked = ""
+    if key:
+        if len(key) > 10:
+            masked = key[:6] + "****" + key[-4:]
+        else:
+            masked = key[:3] + "****"
+    balance = None
+    if platform and key:
+        try:
+            balance = captcha_service.get_balance()
+        except Exception:
+            pass
+    return {
+        "platform": platform,
+        "client_key_masked": masked,
+        "client_key_set": bool(key),
+        "balance": balance,
+    }
+
+
+@app.post("/api/captcha-settings")
+async def set_captcha_settings(req: CaptchaConfigRequest):
+    """保存打码平台配置"""
+    platform = req.platform.strip().lower()
+    key = req.client_key.strip()
+
+    if platform and platform not in ("yescaptcha", "capsolver"):
+        return {"ok": False, "error": "不支持的平台，请选择 yescaptcha 或 capsolver"}
+
+    if platform and not key:
+        return {"ok": False, "error": "请输入 API Key (clientKey)"}
+
+    try:
+        config.save_captcha_config(platform, key)
+
+        # 验证 key 可用性
+        if platform and key:
+            try:
+                balance = captcha_service.get_balance()
+                return {"ok": True, "message": f"已保存！当前余额: {balance} 积分", "balance": balance}
+            except Exception as e:
+                return {"ok": True, "message": f"已保存，但验证余额失败: {e}（请检查 Key 是否正确）"}
+        else:
+            return {"ok": True, "message": "已清除打码平台配置"}
+    except Exception as e:
+        return {"ok": False, "error": f"保存失败: {e}"}
+
+
 @app.post("/api/kill-all-browsers")
 async def kill_all_browsers():
-    """一键关闭所有由 JetBrainsReg 管理的浏览器 + 系统中所有带 debug 端口的浏览器进程"""
+    """一键关闭所有由 FingerprintReg 管理的浏览器 + 系统中所有带 debug 端口的浏览器进程"""
     import subprocess
     killed = 0
     errors = []
@@ -710,6 +799,9 @@ async def kill_all_browsers():
         _broadcast_from_thread({"type": "stopped"})
         logger.info("[KillAll] 已重置运行状态")
 
+    # 3.5 重置端口计数器，确保新批次不会与旧端口冲突
+    reset_port_counter()
+
     # 4. 后台清理数据目录（不阻塞返回）
     def _bg_cleanup():
         import time as _t
@@ -762,7 +854,7 @@ async def force_start_registration(req: StartRequest):
     thread = threading.Thread(
         target=_run_batch_force,
         args=(start_id, req.count, req.password, req.first_name, req.last_name, req.browser, req.country, req.incognito,
-              req.auto_select_country, req.auto_click_add_card),
+              req.auto_select_country, req.auto_click_add_card, req.ai_captcha, req.fullscreen),
         daemon=True,
     )
     thread.start()
@@ -797,7 +889,7 @@ async def get_browsers():
     # 1. 扫描系统进程
     scanned = scan_debug_browsers()
 
-    # 2. 合并 JetBrainsReg 自己注册时保留的浏览器
+    # 2. 合并 FingerprintReg 自己注册时保留的浏览器
     with state.lock:
         for task_id, browser in list(state.browsers.items()):
             try:
@@ -807,7 +899,7 @@ async def get_browsers():
                     "pid": 0,
                     "port": 0,
                     "browser": "jetbrainsreg",
-                    "title": f"JetBrainsReg #{task_id}",
+                    "title": f"FingerprintReg #{task_id}",
                     "url": url,
                     "task_id": task_id,
                     "email": state.tasks.get(task_id, {}).get("email", ""),
@@ -889,6 +981,7 @@ class LoginCheckRequest(BaseModel):
     goto_card_page: bool = True   # 未绑卡的自动跳转到绑卡页
     country: str = "JP"           # tokens 页选择的国家代码
     incognito: bool = True
+    fullscreen: bool = False      # 是否最大化浏览器窗口
 
 
 # 一键登录的进行中状态
@@ -999,6 +1092,7 @@ async def login_and_check_api(req: LoginCheckRequest):
                 goto_card_page=req.goto_card_page,
                 country=req.country,
                 incognito=req.incognito,
+                fullscreen=req.fullscreen,
                 on_progress=on_progress,
             )
         except Exception as e:
@@ -1047,7 +1141,7 @@ async def fill_card(req: FillCardRequest):
             except Exception as e:
                 return {"ok": False, "error": f"连接端口 {port} 失败: {str(e)}"}
         else:
-            # JetBrainsReg 自己注册的浏览器
+            # FingerprintReg 自己注册的浏览器
             with state.lock:
                 browser = state.browsers.get(req.task_id)
             if not browser:
@@ -1057,7 +1151,7 @@ async def fill_card(req: FillCardRequest):
         # task_id == 0：填所有扫描到的浏览器
         scanned = scan_debug_browsers()
         if not scanned:
-            # 回退到 JetBrainsReg 自己的浏览器
+                # 回退到 FingerprintReg 自己的浏览器
             with state.lock:
                 if not state.browsers:
                     return {"ok": False, "error": "没有扫描到任何浏览器窗口"}
@@ -1126,7 +1220,7 @@ def _parallel_exec(targets: list, func, max_workers: int = 5) -> list:
 def _collect_browser_targets(task_id: int) -> tuple[list, str | None]:
     """
     根据 task_id 收集目标浏览器列表。
-    task_id=0 表示所有窗口，>=9000 当作端口号，其余当作 JetBrainsReg task_id。
+    task_id=0 表示所有窗口，>=9000 当作端口号，其余当作 FingerprintReg task_id。
     返回 (targets, error)，targets 为 [(label, browser), ...]。
     """
     targets = []
@@ -1262,7 +1356,7 @@ def _make_status_callback(task_id: int, country: str = ""):
     return callback
 
 
-def _run_batch(count: int, password: str, first_name: str, last_name: str, browser: str = "chrome", country: str = "JP", incognito: bool = True, auto_select_country: bool = True, auto_click_add_card: bool = True):
+def _run_batch(count: int, password: str, first_name: str, last_name: str, browser: str = "chrome", country: str = "JP", incognito: bool = True, auto_select_country: bool = True, auto_click_add_card: bool = True, ai_captcha: bool = False, fullscreen: bool = False):
     try:
         with ThreadPoolExecutor(max_workers=count) as executor:
             futures = {}
@@ -1271,7 +1365,7 @@ def _run_batch(count: int, password: str, first_name: str, last_name: str, brows
                     break
                 future = executor.submit(
                     _run_single_task, i, password, first_name, last_name, browser, country, incognito,
-                    auto_select_country, auto_click_add_card
+                    auto_select_country, auto_click_add_card, ai_captcha, fullscreen
                 )
                 futures[future] = i
                 if i < count:
@@ -1297,7 +1391,7 @@ def _run_batch(count: int, password: str, first_name: str, last_name: str, brows
         logger.info("批量注册全部完成")
 
 
-def _run_single_task(task_id: int, password: str, first_name: str, last_name: str, browser: str = "chrome", country: str = "JP", incognito: bool = True, auto_select_country: bool = True, auto_click_add_card: bool = True):
+def _run_single_task(task_id: int, password: str, first_name: str, last_name: str, browser: str = "chrome", country: str = "JP", incognito: bool = True, auto_select_country: bool = True, auto_click_add_card: bool = True, ai_captcha: bool = False, fullscreen: bool = False):
     callback = _make_status_callback(task_id, country=country)
     result = register_one(
         task_id=task_id,
@@ -1311,6 +1405,8 @@ def _run_single_task(task_id: int, password: str, first_name: str, last_name: st
         incognito=incognito,
         auto_select_country=auto_select_country,
         auto_click_add_card=auto_click_add_card,
+        ai_captcha=ai_captcha,
+        fullscreen=fullscreen,
     )
     # 保留浏览器实例引用（无论成功失败），供一键填卡使用或用户手动操作
     if result.browser:
@@ -1322,7 +1418,7 @@ def _run_single_task(task_id: int, password: str, first_name: str, last_name: st
             logger.info(f"[Task {task_id}] 浏览器实例已保留（注册失败，保留供检查）")
 
 
-def _run_batch_force(start_id: int, count: int, password: str, first_name: str, last_name: str, browser: str = "chrome", country: str = "JP", incognito: bool = True, auto_select_country: bool = True, auto_click_add_card: bool = True):
+def _run_batch_force(start_id: int, count: int, password: str, first_name: str, last_name: str, browser: str = "chrome", country: str = "JP", incognito: bool = True, auto_select_country: bool = True, auto_click_add_card: bool = True, ai_captcha: bool = False, fullscreen: bool = False):
     """强制启动模式的批量任务：不清空已有任务，追加新任务"""
     try:
         with ThreadPoolExecutor(max_workers=count) as executor:
@@ -1333,7 +1429,7 @@ def _run_batch_force(start_id: int, count: int, password: str, first_name: str, 
                     break
                 future = executor.submit(
                     _run_single_task, tid, password, first_name, last_name, browser, country, incognito,
-                    auto_select_country, auto_click_add_card
+                    auto_select_country, auto_click_add_card, ai_captcha, fullscreen
                 )
                 futures[future] = tid
                 if i < count - 1:

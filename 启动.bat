@@ -1,16 +1,21 @@
 @echo off
-title jetbrainsreg Launcher
-echo 正在启动 jetbrainsreg 模块...
-
-:: 执行 python -m jetbrainsreg
-py -m jetbrainsreg
-
-:: 检查执行是否出错
-if errorlevel 1 (
-    echo 执行 jetbrainsreg 时发生错误（错误代码: %errorlevel%）
-) else (
-    echo jetbrainsreg 执行完成。
+cd /d "%~dp0"
+chcp 65001 >nul 2>nul
+echo.
+echo ========================================
+echo   JetBrainsReg Launcher
+echo ========================================
+echo.
+py -m jetbrainsreg %*
+if %errorlevel% neq 0 (
+    echo.
+    echo ========================================
+    echo   JetBrainsReg exited with error.
+    echo   Possible causes:
+    echo     1. Port 7860 is in use
+    echo     2. Run: pip install -r requirements.txt
+    echo     3. Python 3.10+ required
+    echo ========================================
+    echo.
 )
-
-:: 暂停，以便用户查看输出
 pause

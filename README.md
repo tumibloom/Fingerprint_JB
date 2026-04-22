@@ -1,27 +1,27 @@
-# Fingerprint_JetBrains — 账号半自动批量注册机
+# FingerprintReg — Fingerprint 账号注册机
 
-一键批量注册 JetBrains 账号，独立指纹浏览器 + 全流程自动化 + Web 控制面板。你只需要手动点几下图片验证码，剩下的全部自动完成。
+一键批量注册账号，独立指纹浏览器 + 全流程自动化 + Web 控制面板。支持全自动验证码（打码平台 + AI 识别），也支持手动过验证码。
 
 ---
 
 ## 功能亮点
 
-- 🎭 **独立指纹浏览器** — 每个窗口独立指纹（平台/品牌/时区/CPU），互不关联
-- 📧 **自动申请临时邮箱** — 基于 YYDS Mail API，无需手动注册邮箱
-- 🤖 **自动点击 "I'm not a robot"** — reCAPTCHA 复选框自动点击
-- 👤 **你手动完成图片验证码**（唯一需要人工的步骤，无时间限制）
-- 🔑 **自动接收验证码并填入** — 6 位 OTP 逐位精准键入
-- 📝 **自动填写密码和姓名** — 随机真人英文名，密码统一配置
-- 🌏 **双模式国家选择** — 自选模式（搜索 + 随机）/ 常用模式（收藏夹标签快选）
-- 💳 **一键填卡** — 注册完直接弹出信用卡填写界面，支持智能识别粘贴
-- 🔄 **一键登录 + 检测绑卡** — 浏览器关闭后重新登录，自动检测绑卡状态
-- 📥 **导入账号** — 粘贴已有账号批量导入，支持多种格式自动解析
-- 🌐 **国家自动识别** — 注册时自动记录，已有账号可二次检测补全
-- 🔒 **绑卡状态持久化** — 已绑/未绑状态保存到文件，重启不丢失，后台实时监测变化
-- 🚀 **多窗口并行** — 注册、登录、填卡全部支持并发，效率翻倍
-- ⚙️ **自动选国家 / 自动点绑卡** — 可独立开关控制
-- 🎨 **Web 控制面板** — 实时进度、4 种主题、延迟参数可调、表单数据持久化
-- 💾 **注册结果永久保存** — 账号信息自动保存到 JSON + CSV，不会丢失
+- **全自动验证码** — 三级自动化：打码平台（YesCaptcha/CapSolver）→ AI 视觉识别（Gemini）→ 手动兜底
+- **独立指纹浏览器** — 每个窗口独立指纹（平台/品牌/时区/CPU），互不关联
+- **自动申请临时邮箱** — 基于 YYDS Mail API，无需手动注册邮箱
+- **自动点击 "I'm not a robot"** — reCAPTCHA 复选框自动点击
+- **自动接收验证码并填入** — 6 位 OTP 逐位精准键入
+- **自动填写密码和姓名** — 随机真人英文名，密码统一配置
+- **双模式国家选择** — 自选模式（搜索 + 随机）/ 常用模式（收藏夹标签快选）
+- **一键填卡** — 注册完直接弹出信用卡填写界面，支持智能识别粘贴
+- **一键登录 + 检测绑卡** — 浏览器关闭后重新登录，自动检测绑卡状态
+- **导入账号** — 粘贴已有账号批量导入，支持多种格式自动解析
+- **国家自动识别** — 注册时自动记录，已有账号可二次检测补全
+- **绑卡状态持久化** — 已绑/未绑状态保存到文件，重启不丢失，后台实时监测变化
+- **多窗口并行** — 注册、登录、填卡全部支持并发，效率翻倍
+- **自动选国家 / 自动点绑卡** — 可独立开关控制
+- **Web 控制面板** — 实时进度、4 种主题、延迟参数可调、表单数据持久化
+- **注册结果永久保存** — 账号信息自动保存到 JSON + CSV，不会丢失
 
 ---
 
@@ -38,7 +38,7 @@
 | **Python 3.10+** | 运行环境，安装时**必须勾选** "Add Python to PATH" | https://www.python.org/downloads/ |
 | **YYDS Mail API Key** | 临时邮箱服务，需注册获取 Key | https://vip.215.im/api-keys |
 | **指纹浏览器**（可选） | 放到 `Chromium/Application/` 目录下，不放则使用系统 Chrome/Edge | 自备 fingerprint-chromium |
-| **梯子 / VPN** | 中国大陆用户需要，访问 Google 验证码和 JetBrains | — |
+| **梯子 / VPN** | 中国大陆用户需要，访问 Google 验证码 | — |
 
 > Python 依赖（DrissionPage、FastAPI 等）不需要单独下载，一条命令自动安装。
 
@@ -73,11 +73,11 @@ python -m jetbrainsreg
 ```
 步骤 1  自动申请临时邮箱（YYDS Mail API）
   ↓
-步骤 2  打开 JetBrains 注册页 → 自动填入邮箱 → 点击 Continue
+步骤 2  打开注册页 → 自动填入邮箱 → 点击 Continue
   ↓
 步骤 3  自动点击 reCAPTCHA "I'm not a robot" 复选框
   ↓
-步骤 4  👤 你手动完成图片验证码（无时间限制）
+步骤 4  全自动验证码：打码平台 → AI 视觉识别 → 手动兜底（可选）
   ↓
 步骤 5  自动检测验证完成 → 自动提交 → 自动接收邮件验证码 → 自动填入 OTP
   ↓
@@ -87,6 +87,16 @@ python -m jetbrainsreg
   ↓
 步骤 8  自动跳转 tokens 页 → 自动选国家 → 自动弹出 Add credit card（可关闭）
 ```
+
+### 全自动验证码说明
+
+勾选「全自动验证码」后，验证码处理按以下优先级自动降级：
+
+1. **打码平台**（YesCaptcha / CapSolver）— 通过 API 提交 reCAPTCHA sitekey，获取 token 直接注入页面，成功率最高
+2. **AI 视觉识别**（Gemini 3 Flash）— CDP 截图 + AI 返回坐标点击，免费内置，无需配置
+3. **手动兜底** — 以上都失败时，等待用户手动完成（无时间限制）
+
+不勾选则为纯手动模式（和之前一样）。
 
 ---
 
@@ -130,7 +140,7 @@ python -m jetbrainsreg
 
 放置位置（脚本自动搜索）：
 ```
-JetBrainsReg/
+FingerprintReg/
 ├── Chromium/
 │   └── Application/
 │       └── chrome.exe        ← 指纹浏览器放这里
@@ -159,30 +169,32 @@ JetBrainsReg/
 ## 项目结构
 
 ```
-JetBrainsReg/
-├── README.md                ← 项目说明
-├── 使用教程.txt              ← 详细使用教程
-├── 启动.bat                  ← 双击启动
-├── requirements.txt          ← Python 依赖
-├── Chromium/                 ← 指纹浏览器（可选）
-├── jetbrainsreg/             ← 主程序
-│   ├── main.py               ← 启动入口
-│   ├── server.py             ← Web 控制面板后端（FastAPI + WebSocket）
-│   ├── register.py           ← 注册流程（8步自动化）+ 一键登录 + 填卡
-│   ├── email_service.py      ← YYDS Mail 临时邮箱 API
-│   ├── config.py             ← 配置（API Key、延迟参数、指纹池等）
-│   └── static/index.html     ← 控制面板网页（单文件 SPA）
-└── output/                   ← 自动生成
-    ├── accounts.json          ← 注册账号（含绑卡状态、国家）
-    ├── accounts.csv           ← 注册账号（Excel 可打开）
-    └── settings.json          ← API Key 等持久化设置
+FingerprintReg/
+├── README.md                  ← 项目说明
+├── 使用教程.txt                ← 详细使用教程
+├── 启动.bat                    ← 双击启动
+├── requirements.txt            ← Python 依赖
+├── Chromium/                   ← 指纹浏览器（可选）
+├── jetbrainsreg/               ← 主程序
+│   ├── main.py                 ← 启动入口
+│   ├── server.py               ← Web 控制面板后端（FastAPI + WebSocket）
+│   ├── register.py             ← 注册流程（8步自动化）+ 一键登录 + 填卡
+│   ├── email_service.py        ← YYDS Mail 临时邮箱 API
+│   ├── captcha_service.py      ← 打码平台接入（YesCaptcha / CapSolver）
+│   ├── captcha_solver.py       ← AI 验证码识别（Gemini 3 Flash + CDP 截图）
+│   ├── config.py               ← 配置（API Key、延迟参数、指纹池、打码平台等）
+│   └── static/index.html       ← 控制面板网页（单文件 SPA）
+└── output/                     ← 自动生成
+    ├── accounts.json            ← 注册账号（含绑卡状态、国家）
+    ├── accounts.csv             ← 注册账号（Excel 可打开）
+    └── settings.json            ← API Key、打码平台等持久化设置
 ```
 
 ---
 
 ## 技术栈
 
-Python 3.10+ / DrissionPage / FastAPI / WebSocket / YYDS Mail API / fingerprint-chromium
+Python 3.10+ / DrissionPage / FastAPI / WebSocket / YYDS Mail API / fingerprint-chromium / YesCaptcha / CapSolver / Gemini AI
 
 ---
 
@@ -213,4 +225,4 @@ Python 3.10+ / DrissionPage / FastAPI / WebSocket / YYDS Mail API / fingerprint-
 
 ## 免责声明
 
-本项目仅供学习和研究自动化技术使用。使用者应遵守 JetBrains 的服务条款和相关法律法规。作者不对因使用本工具造成的任何后果承担责任。
+本项目仅供学习和研究自动化技术使用。使用者应遵守相关服务条款和法律法规。作者不对因使用本工具造成的任何后果承担责任。

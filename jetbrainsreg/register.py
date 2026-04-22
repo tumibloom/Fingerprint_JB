@@ -1,5 +1,5 @@
 """
-JetBrainsReg 全自动注册流程（v2 — 集成指纹 + 全自动化）
+FingerprintReg 全自动注册流程（v2 — 集成指纹 + 全自动化）
 DrissionPage 控制浏览器完成 9 步：
   1. Accept All (Cookie 弹窗) — 三重 Cookie 守护
   2. Continue with email
@@ -26,6 +26,8 @@ from DrissionPage import Chromium, ChromiumOptions
 
 from . import config
 from . import email_service
+from . import captcha_solver
+from . import captcha_service
 
 logger = logging.getLogger("jetbrainsreg.register")
 
@@ -117,37 +119,124 @@ def _make_fp_args(seed: int) -> tuple[list[str], dict]:
     """
     根据种子生成 fingerprint-chromium 的启动参数和指纹信息摘要。
     返回 (args_list, fp_info_dict)。
+    支持通过 config.FINGERPRINT_TOGGLES 控制各项指纹特性的开关。
     """
+    toggles = config.FINGERPRINT_TOGGLES
     rnd = random.Random(seed)
+
+    # 读取各项参数候选值
     plat, plat_ver = rnd.choice(config.FINGERPRINT_PLATFORMS)
     brand, brand_ver = rnd.choice(config.FINGERPRINT_BRANDS)
     tz = rnd.choice(config.FINGERPRINT_TIMEZONES)
-    cpu = rnd.choice([2, 4, 6, 8, 12, 16])
+    cpu = rnd.choice(config.FINGERPRINT_CPU_CORES)
+    lang, accept_lang = rnd.choice(config.FINGERPRINT_LANGUAGES)
+    memory = rnd.choice(config.FINGERPRINT_MEMORY_SIZES)
 
-    args = [
-        f"--fingerprint={seed}",
-        f"--fingerprint-platform={plat}",
-        f"--fingerprint-brand={brand}",
-        f"--fingerprint-hardware-concurrency={cpu}",
-        f"--timezone={tz}",
-        "--lang=en-US",
-        "--accept-lang=en-US,en",
-        "--disable-blink-features=AutomationControlled",
+    args = []
+    fp_info = {"seed": seed}
+
+    # ── 核心指纹种子（总开关） ──
+    if toggles.get("fp_enabled", True):
+        args.append(f"--fingerprint={seed}")
+
+    # ── 操作系统平台 ──
+    if toggles.get("fp_platform", True):
+        args.append(f"--fingerprint-platform={plat}")
+        if plat_ver:
+            args.append(f"--fingerprint-platform-version={plat_ver}")
+        fp_info["platform"] = plat
+    else:
+        fp_info["platform"] = "(native)"
+
+    # ── 浏览器品牌 (User-Agent / UA Data) ──
+    if toggles.get("fp_brand", True):
+        args.append(f"--fingerprint-brand={brand}")
+        if brand_ver:
+            args.append(f"--fingerprint-brand-version={brand_ver}")
+        fp_info["brand"] = brand
+    else:
+        fp_info["brand"] = "(native)"
+
+    # ── CPU 核心数 ──
+    if toggles.get("fp_cpu", True):
+        args.append(f"--fingerprint-hardware-concurrency={cpu}")
+        fp_info["cpu"] = cpu
+    else:
+        fp_info["cpu"] = "(native)"
+
+    # ── 时区 ──
+    if toggles.get("fp_timezone", True):
+        args.append(f"--timezone={tz}")
+        fp_info["timezone"] = tz
+    else:
+        fp_info["timezone"] = "(native)"
+
+    # ── 语言 ──
+    if toggles.get("fp_language", True):
+        args.append(f"--lang={lang}")
+        args.append(f"--accept-lang={accept_lang}")
+        fp_info["language"] = lang
+    else:
+        # 默认英文，防止 JetBrains 页面变成其他语言
+        args.append("--lang=en-US")
+        args.append("--accept-lang=en-US,en")
+        fp_info["language"] = "en-US"
+
+    # ── 内存大小 (navigator.deviceMemory) ──
+    if toggles.get("fp_memory", True):
+        # fingerprint-chromium 通过 --fingerprint 种子自动生成内存值
+        # 无需额外参数，但记录到 fp_info 供日志
+        fp_info["memory"] = f"{memory}GB"
+    else:
+        fp_info["memory"] = "(native)"
+
+    # ── WebRTC 策略 ──
+    if toggles.get("fp_webrtc", True):
+        args.append("--disable-non-proxied-udp")
+        fp_info["webrtc"] = "disabled-non-proxied-udp"
+    else:
+        fp_info["webrtc"] = "(native)"
+
+    # ── 收集需要 disable 的指纹伪装模块 (--disable-spoofing) ──
+    disable_spoofing = []
+    if not toggles.get("fp_canvas", True):
+        disable_spoofing.append("canvas")
+    if not toggles.get("fp_audio", True):
+        disable_spoofing.append("audio")
+    if not toggles.get("fp_font", True):
+        disable_spoofing.append("font")
+    if not toggles.get("fp_clientrects", True):
+        disable_spoofing.append("clientrects")
+    if not toggles.get("fp_gpu", True):
+        disable_spoofing.append("gpu")
+
+    if disable_spoofing:
+        args.append(f"--disable-spoofing={','.join(disable_spoofing)}")
+        fp_info["disabled_spoofing"] = disable_spoofing
+
+    # ── 反自动化检测 ──
+    if toggles.get("fp_automation", True):
+        args.append("--disable-blink-features=AutomationControlled")
+        args.append("--test-type")
+
+    # ── Webdriver 隐藏 ──
+    if toggles.get("fp_webdriver", True):
+        # fingerprint-chromium 默认已设 navigator.webdriver=false
+        # --disable-blink-features=AutomationControlled 也有同样效果
+        fp_info["webdriver"] = "hidden"
+    else:
+        fp_info["webdriver"] = "(native)"
+
+    # ── 通用浏览器参数（不受开关影响） ──
+    args.extend([
         "--disable-infobars",
-        "--test-type",
         "--no-default-browser-check",
         "--no-first-run",
         "--disable-features=Translate,OptimizationHints,MediaRouter",
         "--disable-session-crashed-bubble",
         "--disable-save-password-bubble",
-    ]
-    if plat_ver:
-        args.append(f"--fingerprint-platform-version={plat_ver}")
-    if brand_ver:
-        args.append(f"--fingerprint-brand-version={brand_ver}")
+    ])
 
-    fp_info = {"seed": seed, "platform": plat, "brand": brand,
-               "timezone": tz, "cpu": cpu}
     return args, fp_info
 
 
@@ -223,6 +312,16 @@ def _alloc_port() -> int:
     return port
 
 
+def reset_port_counter():
+    """重置端口计数器，下次分配时重新扫描系统端口。
+    应在 KillAll 浏览器后调用，确保新批次不会与已杀死的旧端口冲突。
+    """
+    global _next_port
+    with _port_lock:
+        _next_port = 0
+    logger.info("[Port] 端口计数器已重置，下次分配时重新扫描")
+
+
 def _cleanup_data_dir(data_dir: Path | None):
     """安全删除浏览器数据目录"""
     if data_dir and data_dir.exists() and data_dir != _BROWSER_DATA_DIR:
@@ -292,15 +391,24 @@ def _safe_run_js(tab, script: str, default=None):
         return default
 
 
-def _safe_get(tab, url: str, timeout: float = 30) -> bool:
-    """安全导航到 URL，超时/异常返回 False 但不抛异常"""
-    try:
-        tab.get(url)
-        tab.wait.doc_loaded(timeout=timeout)
-        return True
-    except Exception as e:
-        logger.warning(f"[SafeGet] 导航到 {url[:60]} 失败: {e}")
-        return False
+def _safe_get(tab, url: str, timeout: float = 30, retries: int = 2) -> bool:
+    """安全导航到 URL，超时/异常返回 False 但不抛异常。
+    对连接断开等临时错误支持自动重试。
+    """
+    for attempt in range(1, retries + 1):
+        try:
+            tab.get(url)
+            tab.wait.doc_loaded(timeout=timeout)
+            return True
+        except Exception as e:
+            err_msg = str(e)
+            logger.warning(f"[SafeGet] 导航到 {url[:60]} 失败 (attempt {attempt}/{retries}): {e}")
+            # 如果是连接断开，等一下再重试（浏览器可能还在启动中）
+            if attempt < retries and ("连接已断开" in err_msg or "disconnected" in err_msg.lower()):
+                time.sleep(3)
+                continue
+            return False
+    return False
 
 
 def cleanup_stale_data_dirs():
@@ -363,7 +471,7 @@ def _find_browser_path(browser_type: str) -> str | None:
     return None
 
 
-def _create_browser(browser_type: str = "chrome", fp_seed: int | None = None, max_retries: int = 3, incognito: bool = True) -> tuple:
+def _create_browser(browser_type: str = "chrome", fp_seed: int | None = None, max_retries: int = 3, incognito: bool = True, fullscreen: bool = False) -> tuple:
     """
     创建浏览器实例（带重试，防止指纹浏览器启动慢导致连接超时）。
     返回 (Chromium实例, fp_info字典或None, data_dir路径)
@@ -419,6 +527,8 @@ def _create_browser(browser_type: str = "chrome", fp_seed: int | None = None, ma
         if incognito:
             co.incognito()
         co.set_argument("--disable-popup-blocking")
+        if fullscreen:
+            co.set_argument("--start-maximized")
 
         try:
             browser = Chromium(co)
@@ -540,6 +650,14 @@ def _click_continue_with_email(tab) -> bool:
         tab.wait.doc_loaded(timeout=config.PAGE_TIMEOUT)
     except Exception:
         pass
+
+    # 先检查浏览器连接是否正常
+    try:
+        _ = tab.url
+    except Exception as e:
+        logger.error(f"[Step 2] 浏览器连接已断开: {e}")
+        return False
+
     try:
         btn = tab.ele("text:Continue with email", timeout=config.PAGE_TIMEOUT)
         if not btn:
@@ -549,6 +667,10 @@ def _click_continue_with_email(tab) -> bool:
         time.sleep(config.DELAY_CLICK)
         logger.info("[Step 2] 已点击 Continue with email")
     except Exception as e:
+        err_msg = str(e)
+        if "连接已断开" in err_msg or "disconnected" in err_msg.lower() or "no browser" in err_msg.lower():
+            logger.error(f"[Step 2] 浏览器连接已断开: {e}")
+            return False
         logger.warning(f"[Step 2] 异常（尝试继续）: {e}")
     return True
 
@@ -560,6 +682,14 @@ def _click_continue_with_email(tab) -> bool:
 def _fill_email(tab, email: str) -> bool:
     """填写邮箱并点击 Continue（触发 reCAPTCHA 加载）"""
     logger.info(f"[Step 3] 填写邮箱: {email}")
+
+    # 先检查浏览器连接是否正常
+    try:
+        _ = tab.url
+    except Exception as e:
+        logger.error(f"[Step 3] 浏览器连接已断开，无法填写邮箱: {e}")
+        return False
+
     try:
         tab.wait.doc_loaded(timeout=15)
     except Exception:
@@ -571,8 +701,11 @@ def _fill_email(tab, email: str) -> bool:
             email_input = tab.ele(selector, timeout=8)
             if email_input:
                 break
-        except Exception:
-            pass
+        except Exception as e:
+            err_msg = str(e)
+            if "连接已断开" in err_msg or "disconnected" in err_msg.lower():
+                logger.error(f"[Step 3] 浏览器连接已断开: {e}")
+                return False
 
     if not email_input:
         logger.error("[Step 3] 未找到邮箱输入框")
@@ -952,6 +1085,365 @@ def _captcha_is_done(tab) -> bool:
 
 
 # ═══════════════════════════════════════════════════════════
+#  Step 5-Platform: 打码平台 Token 注入
+#  提取 sitekey → 调用打码平台 → 获取 gRecaptchaResponse → JS 注入
+#  （移植自 baiqi-GhostReg）
+# ═══════════════════════════════════════════════════════════
+
+def _extract_sitekey(tab) -> str:
+    """从页面中提取 reCAPTCHA sitekey（从 iframe src 的 k= 参数中提取）"""
+    try:
+        sitekey = tab.run_js("""
+            for (const f of document.querySelectorAll('iframe')) {
+                const src = f.src || '';
+                if (src.includes('recaptcha') && src.includes('/anchor')) {
+                    const m = src.match(/[?&]k=([^&]+)/);
+                    if (m) return m[1];
+                }
+            }
+            // 降级：查找 data-sitekey 属性
+            const el = document.querySelector('[data-sitekey]');
+            if (el) return el.getAttribute('data-sitekey');
+            return '';
+        """)
+        if sitekey:
+            logger.info(f"[Platform] 提取到 sitekey: {sitekey[:20]}...")
+        return sitekey or ""
+    except Exception as e:
+        logger.warning(f"[Platform] 提取 sitekey 失败: {e}")
+        return ""
+
+
+def _inject_recaptcha_token(tab, token: str) -> bool:
+    """
+    将打码平台返回的 gRecaptchaResponse token 注入到页面中。
+    核心步骤：填 textarea → 触发回调 → 关闭 dialog → 移除 reCAPTCHA iframe
+    """
+    import json as _json
+    safe_token = _json.dumps(token)
+    try:
+        tab.run_js(f'window.__ghostreg_token = {safe_token};')
+    except Exception as e:
+        logger.warning(f"[Platform] 设置 token 变量失败: {e}")
+        return False
+
+    try:
+        result = tab.run_js("""
+            const token = window.__ghostreg_token;
+            let status = [];
+
+            // 1. 填充所有 g-recaptcha-response textarea
+            const textareas = document.querySelectorAll('textarea[id*="g-recaptcha-response"]');
+            for (const ta of textareas) {
+                ta.innerHTML = token;
+                ta.value = token;
+                ta.style.display = 'block';
+            }
+            status.push('filled:' + textareas.length);
+
+            // 2. 触发 reCAPTCHA 回调
+            let callbackFired = false;
+            try {
+                const clients = ___grecaptcha_cfg.clients;
+                for (const cid in clients) {
+                    const client = clients[cid];
+                    function findCb(obj, depth) {
+                        if (depth > 8 || !obj || typeof obj !== 'object') return null;
+                        for (const k of ['callback', 'success-callback', 'resolve']) {
+                            if (typeof obj[k] === 'function') return obj[k];
+                        }
+                        for (const k in obj) {
+                            if (typeof obj[k] === 'object' && obj[k] !== null) {
+                                const found = findCb(obj[k], depth + 1);
+                                if (found) return found;
+                            }
+                        }
+                        return null;
+                    }
+                    const cb = findCb(client, 0);
+                    if (cb) {
+                        cb(token);
+                        callbackFired = true;
+                        status.push('callback_ok');
+                        break;
+                    }
+                }
+            } catch(e) { status.push('callback_err:' + e.message); }
+
+            // 3. 全局回调降级
+            if (!callbackFired) {
+                try {
+                    if (typeof onRecaptchaSuccess === 'function') {
+                        onRecaptchaSuccess(token);
+                        callbackFired = true;
+                        status.push('global_cb');
+                    }
+                } catch(e) {}
+            }
+
+            // 4. 强制关闭 dialog
+            const dialogs = document.querySelectorAll('dialog[open]');
+            for (const d of dialogs) {
+                d.removeAttribute('open');
+                d.close && d.close();
+            }
+            status.push('dialog_closed:' + dialogs.length);
+
+            // 5. 隐藏/移除 reCAPTCHA iframe
+            const iframes = document.querySelectorAll('iframe[title*="reCAPTCHA"], iframe[title*="recaptcha"], iframe[src*="recaptcha"]');
+            let hidden = 0;
+            for (const f of iframes) {
+                f.style.display = 'none';
+                f.style.visibility = 'hidden';
+                f.style.width = '0';
+                f.style.height = '0';
+                let parent = f.parentElement;
+                for (let i = 0; i < 5 && parent; i++) {
+                    if (parent.style && (parent.style.position === 'fixed' || parent.style.position === 'absolute'
+                        || parent.style.zIndex > 1000 || getComputedStyle(parent).position === 'fixed')) {
+                        parent.style.display = 'none';
+                        break;
+                    }
+                    parent = parent.parentElement;
+                }
+                hidden++;
+            }
+            status.push('iframes_hidden:' + hidden);
+
+            // 6. 移除所有 reCAPTCHA 遮罩层
+            const overlays = document.querySelectorAll('div[style*="z-index"][style*="position: fixed"], div[style*="z-index"][style*="position:fixed"]');
+            let removed = 0;
+            for (const o of overlays) {
+                const zi = parseInt(getComputedStyle(o).zIndex);
+                if (zi > 1000000) {
+                    o.style.display = 'none';
+                    removed++;
+                }
+            }
+            status.push('overlays_removed:' + removed);
+
+            return status.join('|');
+        """)
+        logger.info(f"[Platform] Token 注入结果: {result}")
+        return True
+    except Exception as e:
+        logger.warning(f"[Platform] Token 注入失败: {e}")
+        return False
+
+
+def _cleanup_recaptcha_overlays(tab):
+    """清理 reCAPTCHA 残留的 dialog/iframe/遮罩层，防止遮挡后续操作"""
+    try:
+        tab.run_js("""
+            // 关闭所有 dialog
+            document.querySelectorAll('dialog[open]').forEach(d => {
+                d.removeAttribute('open');
+                try { d.close(); } catch(e) {}
+            });
+            // 隐藏 reCAPTCHA iframe
+            document.querySelectorAll('iframe[title*="reCAPTCHA"], iframe[title*="recaptcha"], iframe[src*="recaptcha"]').forEach(f => {
+                f.style.display = 'none';
+                f.style.width = '0';
+                f.style.height = '0';
+            });
+            // 隐藏 Google reCAPTCHA 遮罩层（z-index > 1000000 的 fixed div）
+            document.querySelectorAll('div').forEach(d => {
+                const s = getComputedStyle(d);
+                if (s.position === 'fixed' && parseInt(s.zIndex) > 1000000) {
+                    d.style.display = 'none';
+                }
+            });
+        """)
+    except Exception:
+        pass
+
+
+def _solve_with_platform(tab, cancel_flag: Callable[[], bool] | None = None) -> bool:
+    """
+    使用打码平台解决 reCAPTCHA v2：
+    1. 从页面提取 sitekey
+    2. 调用打码平台 API 获取 token
+    3. 注入 token 到页面
+    """
+    if not captcha_service.is_enabled():
+        logger.warning("[Platform] 打码平台未配置")
+        return False
+
+    logger.info("[Platform] 开始打码平台流程...")
+
+    # 提取 sitekey（最多重试 3 次）
+    sitekey = ""
+    for attempt in range(3):
+        sitekey = _extract_sitekey(tab)
+        if sitekey:
+            break
+        logger.warning(f"[Platform] 第 {attempt+1} 次未提取到 sitekey，等 1 秒...")
+        time.sleep(1)
+
+    if not sitekey:
+        logger.error("[Platform] 无法提取 sitekey")
+        return False
+
+    try:
+        page_url = tab.url or config.SIGNUP_URL
+    except Exception:
+        page_url = config.SIGNUP_URL
+
+    # 调用打码平台（10-80 秒）
+    logger.info(f"[Platform] 调用打码平台... (sitekey={sitekey[:20]}...)")
+    try:
+        token = captcha_service.solve_recaptcha_v2(page_url, sitekey)
+    except captcha_service.CaptchaServiceError as e:
+        logger.error(f"[Platform] 打码平台失败: {e}")
+        return False
+
+    if not token:
+        logger.error("[Platform] 打码平台未返回 token")
+        return False
+
+    # 注入 token + 关闭 dialog + 清理 iframe
+    logger.info(f"[Platform] 获得 token（{len(token)} 字符），注入并清理...")
+    if not _inject_recaptcha_token(tab, token):
+        logger.error("[Platform] Token 注入失败")
+        return False
+
+    time.sleep(0.5)
+
+    if _captcha_is_done(tab) or _has_left_email_page(tab):
+        logger.info("[Platform] Token 注入后已通过")
+        return True
+
+    logger.info("[Platform] Token 已注入，等待外层提交 Continue")
+    return True
+
+
+# ═══════════════════════════════════════════════════════════
+#  Step 5-AI: 纯 CDP 截图 + AI 坐标点击（零 iframe 操作）
+#  CDP 截图瞬间完成 → AI 返回坐标 → tab.actions 绝对坐标点击
+#  （移植自 baiqi-GhostReg）
+# ═══════════════════════════════════════════════════════════
+
+def _cdp_screenshot(tab) -> bytes | None:
+    """CDP 截整页，瞬间完成，不会挂死"""
+    import base64 as _b64
+    try:
+        r = tab.run_cdp("Page.captureScreenshot", format="png")
+        if r and "data" in r:
+            return _b64.b64decode(r["data"])
+    except Exception as e:
+        logger.warning(f"[AI] CDP 截图失败: {e}")
+    return None
+
+
+def _has_challenge_visible(tab) -> bool:
+    """用 JS 检测 bframe 是否可见（不进 iframe，不会挂）"""
+    try:
+        result = tab.run_js("""
+            for (const f of document.querySelectorAll('iframe')) {
+                if ((f.src||'').includes('bframe') || (f.title||'').includes('recaptcha challenge')) {
+                    const r = f.getBoundingClientRect();
+                    if (r.width > 50 && r.height > 50) return true;
+                }
+            }
+            return false;
+        """)
+        return bool(result)
+    except Exception:
+        return False
+
+
+def _solve_recaptcha_with_ai(tab, cancel_flag: Callable[[], bool] | None = None) -> bool:
+    """
+    AI 自动识别 reCAPTCHA：纯 CDP 截图 + 坐标点击，零 iframe 操作。
+    整页截图 → AI 看图识别要点击的格子 → 返回坐标 → tab.actions 点击。
+    """
+    round_num = 0
+    try:
+        vp = tab.run_js("return {w: window.innerWidth, h: window.innerHeight}")
+        page_w, page_h = vp["w"], vp["h"]
+    except Exception:
+        page_w, page_h = 1920, 1080
+
+    while True:
+        round_num += 1
+        if cancel_flag and cancel_flag():
+            logger.info("[AI] 取消")
+            return False
+        if _captcha_is_done(tab):
+            logger.info(f"[AI] 已通过（第 {round_num} 轮前）")
+            return True
+
+        logger.info(f"[AI] ===== 第 {round_num} 轮 =====")
+
+        if not _has_challenge_visible(tab):
+            logger.warning("[AI] 弹窗不可见，等 2 秒")
+            time.sleep(2)
+            if _captcha_is_done(tab):
+                return True
+            continue
+
+        time.sleep(0.5)
+        img = _cdp_screenshot(tab)
+        if not img:
+            time.sleep(1)
+            continue
+        logger.info(f"[AI] 截图 {len(img)} bytes")
+
+        coords = captcha_solver.solve_click(img)
+        if not coords:
+            logger.warning("[AI] AI 无坐标返回")
+            time.sleep(2)
+            continue
+
+        logger.info(f"[AI] {len(coords)} 个坐标: {coords!r}")
+
+        clicked = 0
+        for nx, ny in coords:
+            ax = (page_w / 1000) * nx
+            ay = (page_h / 1000) * ny
+            try:
+                tab.actions.move_to((ax, ay)).click()
+                clicked += 1
+                logger.info(f"[AI] 点击 ({nx},{ny})→({ax:.0f},{ay:.0f})")
+                time.sleep(0.3)
+            except Exception as e:
+                logger.warning(f"[AI] 点击失败: {e}")
+
+        if clicked == 0:
+            time.sleep(2)
+            continue
+
+        # 点 Verify 按钮
+        time.sleep(1)
+        try:
+            btn_info = tab.run_js("""
+                for (const f of document.querySelectorAll('iframe')) {
+                    if ((f.src||'').includes('bframe')) {
+                        const r = f.getBoundingClientRect();
+                        if (r.y >= 0 && r.height > 50)
+                            return JSON.stringify({x: r.x + r.width/2, y: r.y + r.height - 35});
+                    }
+                }
+                return '';
+            """)
+            if btn_info:
+                import json as _json
+                pos = _json.loads(btn_info)
+                if pos["y"] > 0:
+                    tab.actions.move_to((pos["x"], pos["y"])).click()
+                    logger.info(f"[AI] Verify ({pos['x']:.0f},{pos['y']:.0f})")
+                else:
+                    logger.warning(f"[AI] Verify 坐标异常 y={pos['y']}")
+        except Exception as e:
+            logger.warning(f"[AI] Verify 失败: {e}")
+
+        time.sleep(2)
+        if _captcha_is_done(tab):
+            logger.info(f"[AI] 通过！（第 {round_num} 轮）")
+            return True
+
+
+# ═══════════════════════════════════════════════════════════
 #  Step 5b: Post-captcha Continue 强化提交
 #  （移植自 批量注册JB保留窗口.py 的 click_continue_react）
 # ═══════════════════════════════════════════════════════════
@@ -1127,10 +1619,11 @@ def _extract_jb_link_or_code(html: str):
     return None
 
 
-def _fill_verification_code(tab, email: str, task_id: int = 0, email_start_ts: int = 0) -> bool:
+def _fill_verification_code(tab, email: str, task_id: int = 0, email_start_ts: int = 0, cancel_check: Callable = None) -> bool:
     """
     轮询邮箱获取验证码并填入。
-    email_start_ts: 邮箱提交到 JetBrains 的时间戳（毫秒），用于过滤旧邮件。
+    使用 email_service.poll_verification_code 统一轮询（支持 YYDS Mail API）。
+    cancel_check: 可选的取消检查函数，返回 True 表示应停止。
     """
     tag = f"[Task {task_id} Step 6]"
     logger.info(f"{tag} 等待页面加载...")
@@ -1148,78 +1641,52 @@ def _fill_verification_code(tab, email: str, task_id: int = 0, email_start_ts: i
     except Exception:
         pass
 
-    # 使用传入的 email_start_ts 过滤旧邮件（在填写邮箱之前记录的时间戳）
-    # 如果没传入，用当前时间减 60 秒作为安全值
-    if email_start_ts <= 0:
-        email_start_ts = int(time.time() * 1000) - 60000
-
-    logger.info(f"{tag} 开始轮询邮箱: {email} (过滤 {email_start_ts} 之前的邮件)")
-    deadline = time.time() + config.EMAIL_POLL_TIMEOUT
-    attempt = 0
+    # 使用 email_service 统一的轮询函数获取验证码
+    logger.info(f"{tag} 开始轮询邮箱验证码: {email}")
     mail_result = None
-    seen_mail_ids = set()
 
-    while time.time() < deadline:
-        attempt += 1
+    try:
+        # 先尝试用 poll_verification_code 获取纯验证码
+        code = email_service.poll_verification_code(email, cancel_check=cancel_check)
+        if code:
+            mail_result = ("CODE", code)
+            logger.info(f"{tag} 获取到验证码: {code}")
+    except email_service.CancelledError:
+        logger.info(f"{tag} 邮件轮询被取消")
+        return False
+    except TimeoutError:
+        logger.error(f"{tag} 邮件轮询超时，未收到验证码")
+        return False
+    except Exception as e:
+        logger.error(f"{tag} 轮询异常: {e}")
+        # 如果 poll 失败，回退到手动轮询模式查找验证链接
+        logger.info(f"{tag} 尝试回退查找验证链接...")
         try:
-            mails = email_service.get_mails(email)
-        except Exception as e:
-            logger.warning(f"{tag} 第{attempt}次轮询网络错误: {e}")
-            time.sleep(config.EMAIL_POLL_INTERVAL)
-            continue
-
-        if mails:
-            for mail in mails:
-                mail_id = mail.get("id", "")
-                if mail_id and mail_id in seen_mail_ids:
-                    continue
-                if mail_id:
-                    seen_mail_ids.add(mail_id)
-
-                # 时间戳过滤：nimail 的 mail_id 是毫秒时间戳
-                # 只接受在邮箱提交给 JetBrains 之后到达的邮件
+            deadline = time.time() + 60  # 额外等 60 秒找链接
+            while time.time() < deadline:
+                # 回退轮询也要检查取消
+                if cancel_check and cancel_check():
+                    logger.info(f"{tag} 回退轮询被取消")
+                    return False
                 try:
-                    mid_int = int(mail_id)
-                    if mid_int < email_start_ts - 5000:  # 5 秒容差
-                        continue  # 静默跳过旧邮件，不打日志（减少噪音）
-                except (ValueError, TypeError):
+                    mails = email_service.get_mails(email)
+                    for mail in mails:
+                        content = mail.get("content", "") or mail.get("html", "") or mail.get("text", "")
+                        if content:
+                            res = _extract_jb_link_or_code(content)
+                            if res:
+                                mail_result = res
+                                break
+                    if mail_result:
+                        break
+                except Exception:
                     pass
-
-                content = mail.get("content", "") or mail.get("html", "") or mail.get("text", "")
-                subject = mail.get("subject", "") or ""
-
-                if not content or len(content.strip()) < 20:
-                    logger.warning(f"{tag} 邮件 {mail_id} 内容为空或过短，跳过")
-                    continue
-
-                # 检查是否是 JetBrains 相关邮件
-                full_text_lower = (subject + " " + content).lower()
-                if "jetbrains" not in full_text_lower and "account" not in full_text_lower:
-                    continue
-
-                # 验证邮件收件人确实是当前 email（防止 API 返回错误邮箱的邮件）
-                mail_to = mail.get("to", "") or ""
-                if mail_to and email.lower() not in mail_to.lower():
-                    logger.warning(f"{tag} 邮件 {mail_id} 收件人 {mail_to} 与当前邮箱 {email} 不匹配，跳过")
-                    continue
-
-                # 提取验证码/链接时只从 content 中提取
-                res = _extract_jb_link_or_code(content)
-                if res:
-                    mail_result = res
-                    logger.info(f"{tag} 从邮件 {mail_id} (subject: {subject[:40]}) 提取到结果")
-                    break
-
-        if mail_result:
-            break
-
-        if attempt % 5 == 0:
-            logger.info(f"{tag} 第{attempt}次轮询，尚未收到验证邮件... (已检查 {len(seen_mail_ids)} 封邮件)")
-
-        time.sleep(config.EMAIL_POLL_INTERVAL)
+                time.sleep(config.EMAIL_POLL_INTERVAL)
+        except Exception:
+            pass
 
     if not mail_result:
-        logger.error(f"{tag} 邮件轮询超时（{config.EMAIL_POLL_TIMEOUT}s），未收到验证")
+        logger.error(f"{tag} 邮件轮询超时，未收到验证")
         return False
 
     kind, payload = mail_result
@@ -1964,6 +2431,8 @@ def register_one(
     incognito: bool = True,
     auto_select_country: bool = True,
     auto_click_add_card: bool = True,
+    ai_captcha: bool = False,
+    fullscreen: bool = False,
 ) -> AccountResult:
     """
     执行一次完整的全自动注册流程。
@@ -1976,6 +2445,7 @@ def register_one(
         browser_type: 浏览器类型 chrome / edge / brave
         on_status: 状态回调，每步更新时调用
         cancel_check: 可选的取消检查函数，返回 True 表示应停止
+        ai_captcha: 是否启用全自动验证码（True=打码平台/AI自动, False=手动）
     """
     if password is None:
         password = config.DEFAULT_PASSWORD
@@ -2044,7 +2514,7 @@ def register_one(
         # 启动浏览器（如指纹浏览器可用，自动生成独立指纹）
         _update(0, "启动浏览器...")
         fp_seed = random.randint(10_000_000, 2_000_000_000) if _is_fingerprint_enabled() else None
-        browser, fp_info, data_dir = _create_browser(browser_type, fp_seed=fp_seed, incognito=incognito)
+        browser, fp_info, data_dir = _create_browser(browser_type, fp_seed=fp_seed, incognito=incognito, fullscreen=fullscreen)
         if fp_info:
             logger.info(f"[Task {task_id}] 指纹浏览器已启动 seed={fp_info['seed']} "
                          f"{fp_info['platform']}/{fp_info['brand']}")
@@ -2063,6 +2533,8 @@ def register_one(
 
         if _is_cancelled():
             return _fail("用户停止了任务")
+        if not _check_browser_alive():
+            return _fail("浏览器进程已退出")
 
         # Step 1
         _update(1, "Cookie 弹窗")
@@ -2072,13 +2544,17 @@ def register_one(
         # Step 2
         if _is_cancelled():
             return _fail("用户停止了任务")
+        if not _check_browser_alive():
+            return _fail("浏览器进程已退出")
         _update(2, "Continue with email")
         if not _click_continue_with_email(tab):
-            return _fail("未找到 Continue with email")
+            return _fail("浏览器连接断开或未找到 Continue with email")
 
         # Step 3
         if _is_cancelled():
             return _fail("用户停止了任务")
+        if not _check_browser_alive():
+            return _fail("浏览器进程已退出")
         _update(3, "填写邮箱")
         # 记录邮箱提交时间（用于 Step 6 过滤旧邮件）
         email_submit_ts = int(time.time() * 1000)
@@ -2132,17 +2608,66 @@ def register_one(
                     break
                 time.sleep(2)
 
-        # Step 5 — 等待用户手动完成验证码（如果需要）
+        # Step 5 — 验证码处理（三级自动化：打码平台 → AI → 手动）
         if not _has_left_email_page(tab) and not _captcha_is_done(tab):
-            _update(5, "⏳ 请手动完成验证码")
-            if not _wait_for_manual_captcha(tab, cancel_flag=_is_cancelled):
-                if _is_cancelled():
-                    return _fail("用户停止了任务")
-                return _fail("验证码超时（用户未操作）")
+            if ai_captcha and captcha_service.is_enabled():
+                # ── 打码平台自动模式 ──
+                _update(5, "打码平台识别中...")
+                platform_ok = _solve_with_platform(tab, cancel_flag=_is_cancelled)
+                if not platform_ok and not _captcha_is_done(tab):
+                    # 打码平台失败 → 降级到 AI
+                    if config.AI_CAPTCHA_ENABLED:
+                        logger.warning("[Step 5] 打码平台失败，降级到 AI 模式")
+                        _update(5, "AI 识别验证码中...")
+                        ai_ok = _solve_recaptcha_with_ai(tab, cancel_flag=_is_cancelled)
+                        if not ai_ok and not _captcha_is_done(tab):
+                            # AI 也失败 → 降级到手动
+                            logger.warning("[Step 5] AI 也失败，降级到手动模式")
+                            _update(5, "自动识别失败，请手动完成验证码")
+                            if not _wait_for_manual_captcha(tab, cancel_flag=_is_cancelled):
+                                if _is_cancelled():
+                                    return _fail("用户停止了任务")
+                                return _fail("验证码未完成")
+                    else:
+                        # AI 未启用 → 直接手动
+                        logger.warning("[Step 5] 打码平台失败，请手动完成验证码")
+                        _update(5, "打码失败，请手动完成验证码")
+                        if not _wait_for_manual_captcha(tab, cancel_flag=_is_cancelled):
+                            if _is_cancelled():
+                                return _fail("用户停止了任务")
+                            return _fail("验证码未完成")
+            elif ai_captcha and not captcha_service.is_enabled() and config.AI_CAPTCHA_ENABLED:
+                # ── 未配置打码平台但 AI 可用 ──
+                _update(5, "AI 识别验证码中...")
+                ai_ok = _solve_recaptcha_with_ai(tab, cancel_flag=_is_cancelled)
+                if not ai_ok and not _captcha_is_done(tab):
+                    logger.warning("[Step 5] AI 失败，降级到手动模式")
+                    _update(5, "AI 识别失败，请手动完成验证码")
+                    if not _wait_for_manual_captcha(tab, cancel_flag=_is_cancelled):
+                        if _is_cancelled():
+                            return _fail("用户停止了任务")
+                        return _fail("验证码未完成")
+            elif ai_captcha:
+                # ── 勾选了自动但什么都没配置 → 提示后转手动 ──
+                logger.warning("[Step 5] 未配置打码平台且 AI 未启用，降级到手动模式")
+                _update(5, "未配置自动验证码，请手动完成")
+                if not _wait_for_manual_captcha(tab, cancel_flag=_is_cancelled):
+                    if _is_cancelled():
+                        return _fail("用户停止了任务")
+                    return _fail("验证码未完成（未配置自动验证码）")
+            else:
+                # ── 手动模式 ──
+                _update(5, "请手动完成验证码")
+                if not _wait_for_manual_captcha(tab, cancel_flag=_is_cancelled):
+                    if _is_cancelled():
+                        return _fail("用户停止了任务")
+                    return _fail("验证码超时（用户未操作）")
 
         # Step 5b — 验证码完成后，自动点击 Continue 提交表单
         if not _has_left_email_page(tab):
             _update(5, "自动提交...")
+            # 清理 reCAPTCHA 残留遮罩（打码平台/AI 模式可能留下 dialog/overlay）
+            _cleanup_recaptcha_overlays(tab)
             _click_continue_after_captcha(tab)
 
         # 等待跳转到 OTP / 下一步页面
@@ -2171,15 +2696,18 @@ def register_one(
             tab.run_js(f'document.title = "#{task_id} 等验证码..."')
         except Exception:
             pass
-        if not _fill_verification_code(tab, email, task_id=task_id, email_start_ts=email_submit_ts):
+        if not _fill_verification_code(tab, email, task_id=task_id, email_start_ts=email_submit_ts, cancel_check=_is_cancelled):
+            if _is_cancelled():
+                return _fail("用户停止了任务")
             return _fail("填写验证码失败")
 
-        # Step 7
+        # Step 7 — 清理 reCAPTCHA 残留遮罩后再填写
         if _is_cancelled():
             return _fail("用户停止了任务")
         if not _check_browser_alive():
             return _fail("浏览器进程已退出")
         _update(7, "填写密码并注册")
+        _cleanup_recaptcha_overlays(tab)
         try:
             tab.run_js(f'document.title = "#{task_id} 注册中..."')
         except Exception:
@@ -2320,7 +2848,7 @@ def connect_browser_by_port(port: int):
     return browser
 
 
-def _open_single_browser(port: int, browser_type: str, url: str, max_retries: int = 2) -> dict:
+def _open_single_browser(port: int, browser_type: str, url: str, max_retries: int = 2, fullscreen: bool = False) -> dict:
     """打开单个浏览器窗口（供并发调用），自动启用指纹（如果可用），带重试"""
     last_err = ""
     for attempt in range(1, max_retries + 1):
@@ -2329,6 +2857,8 @@ def _open_single_browser(port: int, browser_type: str, url: str, max_retries: in
             co.set_local_port(port)
             co.incognito()
             co.set_argument("--disable-popup-blocking")
+            if fullscreen:
+                co.set_argument("--start-maximized")
 
             fp_info = None
             use_fp = _is_fingerprint_enabled() and browser_type in ("fingerprint", "chrome", "edge")
@@ -2385,7 +2915,7 @@ def _open_single_browser(port: int, browser_type: str, url: str, max_retries: in
     return {"port": port, "ok": False, "message": last_err}
 
 
-def open_browsers(count: int = 1, browser_type: str = "chrome", url: str = "") -> list[dict]:
+def open_browsers(count: int = 1, browser_type: str = "chrome", url: str = "", fullscreen: bool = False) -> list[dict]:
     """
     批量打开带 debug 端口的浏览器窗口。
     逐个启动并等待，避免同时启动导致资源争抢和连接超时。
@@ -2395,7 +2925,7 @@ def open_browsers(count: int = 1, browser_type: str = "chrome", url: str = "") -
 
     results = []
     for i, port in enumerate(ports):
-        result = _open_single_browser(port, browser_type, url)
+        result = _open_single_browser(port, browser_type, url, fullscreen=fullscreen)
         results.append(result)
         # 错开启动：每个浏览器之间等 2 秒，让前一个完成初始化
         if i < len(ports) - 1:
@@ -2775,6 +3305,7 @@ def login_and_check(
     goto_card_page: bool = True,
     country: str = "JP",
     incognito: bool = True,
+    fullscreen: bool = False,
 ) -> LoginResult:
     """
     一键登录已注册的 JetBrains 账号并检测绑卡状态。
@@ -2793,7 +3324,7 @@ def login_and_check(
     try:
         # 1. 启动浏览器
         logger.info(f"[Login] 启动浏览器，登录 {email}...")
-        browser, fp_info, data_dir = _create_browser(browser_type, incognito=incognito)
+        browser, fp_info, data_dir = _create_browser(browser_type, incognito=incognito, fullscreen=fullscreen)
         tab = browser.latest_tab
         result.browser = browser
 
@@ -3192,6 +3723,7 @@ def login_batch(
     goto_card_page: bool = True,
     country: str = "JP",
     incognito: bool = True,
+    fullscreen: bool = False,
     on_progress: Callable | None = None,
     max_workers: int = 0,
 ) -> list[LoginResult]:
@@ -3233,6 +3765,7 @@ def login_batch(
             goto_card_page=goto_card_page,
             country=country,
             incognito=incognito,
+            fullscreen=fullscreen,
         )
         return index, r
 
